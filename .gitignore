@@ -1,0 +1,5 @@
+shared-files/*
+!shared-files/.gitkeep
+node_modules/
+.env
+*.log

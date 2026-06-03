@@ -1,0 +1,12 @@
+{
+  "name": "local-file-share",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Share files with nearby devices over your local network.",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

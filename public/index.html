@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Local File Share</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="topbar" aria-label="Server status">
+        <div>
+          <p class="eyebrow">Local network</p>
+          <h1>File Share</h1>
+        </div>
+        <div class="status" id="status">
+          <span class="pulse" aria-hidden="true"></span>
+          <span>Starting</span>
+        </div>
+      </section>
+
+      <section class="grid">
+        <div class="panel upload-panel">
+          <div class="dropzone" id="dropzone" tabindex="0">
+            <input id="fileInput" type="file" multiple>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v12m0-12 4.5 4.5M12 3 7.5 7.5M5 15v3a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-3" />
+            </svg>
+            <h2>Drop files here</h2>
+            <p>or choose files from this device</p>
+            <button class="primary" id="chooseButton" type="button">Choose files</button>
+          </div>
+          <div class="queue" id="queue" aria-live="polite"></div>
+        </div>
+
+        <aside class="panel share-panel">
+          <div>
+            <p class="eyebrow">Open on another device</p>
+            <h2>Same Wi-Fi, same address</h2>
+          </div>
+          <canvas id="addressTile" width="180" height="180" aria-label="Network address tile"></canvas>
+          <div class="address-list" id="addresses"></div>
+        </aside>
+      </section>
+
+      <section class="files-section">
+        <div class="section-header">
+          <div>
+            <p class="eyebrow">Shared folder</p>
+            <h2>Available files</h2>
+          </div>
+          <button class="ghost" id="refreshButton" type="button">Refresh</button>
+        </div>
+        <div class="files" id="files"></div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
