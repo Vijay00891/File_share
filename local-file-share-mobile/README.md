@@ -7,6 +7,7 @@ Native Android app that starts a local HTTP server on the phone so nearby device
 - Start and stop the local server from the app.
 - Show and copy the phone's LAN URL.
 - Pick files from the phone and add them to the shared folder.
+- Pick installed apps and share their APKs (base APK only; split-APK apps need all parts).
 - Other devices can open the URL in a browser to upload, download, refresh, and delete files.
 - Files are stored in the app's external files directory.
 

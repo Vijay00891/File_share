@@ -1,6 +1,10 @@
 package com.vijay.localfileshare;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Intent;
@@ -22,6 +26,7 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.NetworkInterface;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
@@ -104,16 +109,19 @@ public class MainActivity extends Activity {
         toggleButton = primaryButton("Start server");
         Button copyButton = secondaryButton("Copy address");
         Button pickButton = secondaryButton("Add phone files");
+        Button appsButton = secondaryButton("Add installed apps");
         Button refreshButton = secondaryButton("Refresh files");
 
         toggleButton.setOnClickListener(v -> toggleServer());
         copyButton.setOnClickListener(v -> copyAddress());
         pickButton.setOnClickListener(v -> openFilePicker());
+        appsButton.setOnClickListener(v -> showAppPicker());
         refreshButton.setOnClickListener(v -> refreshFiles());
 
         panel.addView(toggleButton);
         panel.addView(copyButton);
         panel.addView(pickButton);
+        panel.addView(appsButton);
         panel.addView(refreshButton);
 
         LinearLayout filesPanel = panel();
@@ -312,6 +320,82 @@ public class MainActivity extends Activity {
         } finally {
             pendingDownloadFile = null;
         }
+    }
+
+    private static class AppEntry {
+        String label;
+        String sourcePath;
+    }
+
+    // Lists launchable user apps, lets the person tick some, and copies their APKs
+    // into the shared folder so other devices can download them.
+    private void showAppPicker() {
+        Toast.makeText(this, "Loading apps...", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            PackageManager pm = getPackageManager();
+            Intent launcher = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+            List<AppEntry> apps = new ArrayList<>();
+            java.util.Set<String> seen = new java.util.HashSet<>();
+            for (ResolveInfo info : pm.queryIntentActivities(launcher, 0)) {
+                ApplicationInfo app = info.activityInfo.applicationInfo;
+                boolean system = (app.flags & ApplicationInfo.FLAG_SYSTEM) != 0
+                        && (app.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) == 0;
+                if (system || !seen.add(app.packageName)) continue;
+                AppEntry entry = new AppEntry();
+                entry.label = String.valueOf(pm.getApplicationLabel(app));
+                entry.sourcePath = app.sourceDir;
+                apps.add(entry);
+            }
+            Collections.sort(apps, (a, b) -> a.label.compareToIgnoreCase(b.label));
+            runOnUiThread(() -> showAppDialog(apps));
+        }, "app-list").start();
+    }
+
+    private void showAppDialog(List<AppEntry> apps) {
+        if (apps.isEmpty()) {
+            Toast.makeText(this, "No installed apps found", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String[] names = new String[apps.size()];
+        for (int i = 0; i < names.length; i++) {
+            names[i] = apps.get(i).label + "  (" + formatBytes(new File(apps.get(i).sourcePath).length()) + ")";
+        }
+        boolean[] checked = new boolean[names.length];
+        new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+                .setTitle("Share installed apps")
+                .setMultiChoiceItems(names, checked, (dialog, which, isChecked) -> checked[which] = isChecked)
+                .setPositiveButton("Add", (dialog, which) -> {
+                    List<AppEntry> chosen = new ArrayList<>();
+                    for (int i = 0; i < checked.length; i++) if (checked[i]) chosen.add(apps.get(i));
+                    copyApps(chosen);
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void copyApps(List<AppEntry> chosen) {
+        if (chosen.isEmpty()) return;
+        Toast.makeText(this, "Copying " + chosen.size() + " app(s)...", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            int ok = 0;
+            for (AppEntry app : chosen) {
+                File target = uniqueFile(sharedDir, LocalShareServer.safeFileName(app.label + ".apk"));
+                try (InputStream input = new java.io.FileInputStream(app.sourcePath);
+                     FileOutputStream output = new FileOutputStream(target)) {
+                    byte[] buffer = new byte[64 * 1024];
+                    int read;
+                    while ((read = input.read(buffer)) != -1) output.write(buffer, 0, read);
+                    ok++;
+                } catch (Exception error) {
+                    target.delete();
+                }
+            }
+            final int done = ok;
+            runOnUiThread(() -> {
+                refreshFiles();
+                Toast.makeText(this, done + " of " + chosen.size() + " app(s) added", Toast.LENGTH_LONG).show();
+            });
+        }, "app-copy").start();
     }
 
     private void copyAddress() {
