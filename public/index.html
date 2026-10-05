@@ -3,58 +3,111 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Local File Share</title>
+    <title>FileDrop — Local File Share</title>
     <link rel="stylesheet" href="/styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   </head>
   <body>
-    <main class="shell">
-      <section class="topbar" aria-label="Server status">
-        <div>
-          <p class="eyebrow">Local network</p>
-          <h1>File Share</h1>
-        </div>
-        <div class="status" id="status">
-          <span class="pulse" aria-hidden="true"></span>
-          <span>Starting</span>
-        </div>
-      </section>
+    <div class="toast-container" id="toastContainer"></div>
 
+    <header class="hero">
+      <div class="hero-inner">
+        <div class="hero-text">
+          <div class="logo">
+            <svg viewBox="0 0 40 40" fill="none" aria-hidden="true">
+              <rect width="40" height="40" rx="10" fill="white" fill-opacity="0.15"/>
+              <path d="M20 10v12m0-12 5 5m-5-5-5 5M11 22v4a4 4 0 0 0 4 4h10a4 4 0 0 0 4-4v-4" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span>FileDrop</span>
+          </div>
+          <h1>Share files instantly<br>across your network</h1>
+          <p class="hero-sub">No signup. No cloud. Just drag, drop and share with any device on your Wi-Fi.</p>
+        </div>
+        <div class="hero-actions">
+          <div class="status-badge" id="status">
+            <span class="status-dot"></span>
+            <span>Connecting…</span>
+          </div>
+          <button class="theme-toggle" id="themeToggle" type="button" title="Toggle dark mode" aria-label="Toggle dark mode">
+            <svg class="icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72 1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <svg class="icon-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main class="container">
       <section class="grid">
-        <div class="panel upload-panel">
+        <!-- Upload Panel -->
+        <div class="card upload-card">
+          <div class="card-header">
+            <div class="card-icon upload-icon">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0-12 4.5 4.5M12 3 7.5 7.5M5 15v3a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <h2>Upload Files</h2>
+          </div>
           <div class="dropzone" id="dropzone" tabindex="0">
             <input id="fileInput" type="file" multiple>
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 3v12m0-12 4.5 4.5M12 3 7.5 7.5M5 15v3a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-3" />
-            </svg>
-            <h2>Drop files here</h2>
-            <p>or choose files from this device</p>
-            <button class="primary" id="chooseButton" type="button">Choose files</button>
+            <div class="dropzone-content">
+              <div class="dropzone-icon-ring">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0-12 4.5 4.5M12 3 7.5 7.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+              <h3>Drag & drop files here</h3>
+              <p>or click to browse your device</p>
+              <button class="btn btn-primary" id="chooseButton" type="button">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Choose Files
+              </button>
+              <span class="dropzone-hint">No size limit</span>
+            </div>
           </div>
           <div class="queue" id="queue" aria-live="polite"></div>
         </div>
 
-        <aside class="panel share-panel">
-          <div>
-            <p class="eyebrow">Open on another device</p>
-            <h2>Same Wi-Fi, same address</h2>
+        <!-- Network Panel -->
+        <div class="card network-card">
+          <div class="card-header">
+            <div class="card-icon network-icon">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M5 12.55a11 11 0 0 1 14 0M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <h2>Network Access</h2>
           </div>
-          <canvas id="addressTile" width="180" height="180" aria-label="Network address tile"></canvas>
+          <p class="card-desc">Open this address on any device connected to the same Wi-Fi network.</p>
+          <div class="qr-wrapper">
+            <canvas id="addressTile" width="180" height="180" aria-label="QR Code"></canvas>
+          </div>
           <div class="address-list" id="addresses"></div>
-        </aside>
+        </div>
       </section>
 
-      <section class="files-section">
-        <div class="section-header">
-          <div>
-            <p class="eyebrow">Shared folder</p>
-            <h2>Available files</h2>
+      <!-- Files Section -->
+      <section class="card files-card">
+        <div class="card-header files-header">
+          <div class="card-header-left">
+            <div class="card-icon files-icon">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="13 2 13 9 20 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div>
+              <h2>Shared Files</h2>
+              <p class="file-count" id="fileCount"></p>
+            </div>
           </div>
-          <button class="ghost" id="refreshButton" type="button">Refresh</button>
+          <button class="btn btn-ghost" id="refreshButton" type="button">
+            <svg viewBox="0 0 24 24" fill="none"><polyline points="23 4 23 10 17 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Refresh
+          </button>
         </div>
         <div class="files" id="files"></div>
       </section>
     </main>
 
+    <footer class="footer">
+      <p>FileDrop — Local File Share · Files stay on your network</p>
+    </footer>
+
+    <script src="/qrcode.js"></script>
     <script src="/app.js"></script>
   </body>
 </html>

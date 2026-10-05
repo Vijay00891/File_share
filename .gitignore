@@ -3,3 +3,5 @@ shared-files/*
 node_modules/
 .env
 *.log
+tools/
+build-app.ps1

@@ -10,7 +10,7 @@ const PORT = Number(process.env.PORT || 3478);
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
 const STORAGE_DIR = path.join(ROOT, "shared-files");
-const MAX_UPLOAD_BYTES = 1024 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = Infinity;
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
