@@ -82,6 +82,8 @@ public class LocalShareServer {
                     serveAsset(output, "public/styles.css", "text/css; charset=utf-8");
                 } else if ("/app.js".equals(request.path)) {
                     serveAsset(output, "public/app.js", "application/javascript; charset=utf-8");
+                } else if ("/logo.png".equals(request.path)) {
+                    serveAsset(output, "public/logo.png", "image/png");
                 } else if ("/qrcode.js".equals(request.path)) {
                     serveAsset(output, "public/qrcode.js", "application/javascript; charset=utf-8");
                 } else if ("/api/files".equals(request.path)) {
