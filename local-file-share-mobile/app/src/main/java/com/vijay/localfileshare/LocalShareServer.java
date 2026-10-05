@@ -24,7 +24,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class LocalShareServer {
-    private static final long MAX_UPLOAD_BYTES = 1024L * 1024L * 1024L;
+    private final android.content.Context context;
     private final int port;
     private final File sharedDir;
     private final ExecutorService workers = Executors.newCachedThreadPool();
@@ -32,7 +32,8 @@ public class LocalShareServer {
     private ServerSocket serverSocket;
     private Thread acceptThread;
 
-    public LocalShareServer(int port, File sharedDir) {
+    public LocalShareServer(android.content.Context context, int port, File sharedDir) {
+        this.context = context;
         this.port = port;
         this.sharedDir = sharedDir;
     }
@@ -74,20 +75,47 @@ public class LocalShareServer {
             Request request = readRequest(input);
             if (request == null) return;
 
-            if ("GET".equals(request.method) && "/".equals(request.path)) {
-                sendText(output, 200, "text/html; charset=utf-8", html());
-            } else if ("GET".equals(request.method) && "/api/files".equals(request.path)) {
-                sendText(output, 200, "application/json; charset=utf-8", filesJson());
+            if ("GET".equals(request.method)) {
+                if ("/".equals(request.path) || "/index.html".equals(request.path)) {
+                    serveAsset(output, "public/index.html", "text/html; charset=utf-8");
+                } else if ("/styles.css".equals(request.path)) {
+                    serveAsset(output, "public/styles.css", "text/css; charset=utf-8");
+                } else if ("/app.js".equals(request.path)) {
+                    serveAsset(output, "public/app.js", "application/javascript; charset=utf-8");
+                } else if ("/qrcode.js".equals(request.path)) {
+                    serveAsset(output, "public/qrcode.js", "application/javascript; charset=utf-8");
+                } else if ("/api/files".equals(request.path)) {
+                    sendText(output, 200, "application/json; charset=utf-8", filesJson());
+                } else if ("/api/info".equals(request.path)) {
+                    sendText(output, 200, "application/json; charset=utf-8", "{\"addresses\":[]}");
+                } else if (request.path.startsWith("/download/")) {
+                    download(output, request.path.substring("/download/".length()));
+                } else {
+                    sendText(output, 404, "application/json; charset=utf-8", "{\"error\":\"Not found\"}");
+                }
             } else if ("POST".equals(request.method) && "/api/upload".equals(request.path)) {
                 receiveUpload(input, output, request);
-            } else if ("GET".equals(request.method) && request.path.startsWith("/download/")) {
-                download(output, request.path.substring("/download/".length()));
             } else if ("DELETE".equals(request.method) && request.path.startsWith("/api/files/")) {
                 delete(output, request.path.substring("/api/files/".length()));
             } else {
                 sendText(output, 404, "application/json; charset=utf-8", "{\"error\":\"Not found\"}");
             }
         } catch (Exception ignored) {
+        }
+    }
+
+    private void serveAsset(OutputStream output, String path, String contentType) throws IOException {
+        try (InputStream is = context.getAssets().open(path)) {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            byte[] buf = new byte[64 * 1024];
+            int read;
+            while((read = is.read(buf)) != -1) baos.write(buf, 0, read);
+            byte[] bytes = baos.toByteArray();
+            writeHeaders(output, 200, contentType, bytes.length, null);
+            output.write(bytes);
+            output.flush();
+        } catch (Exception e) {
+            sendText(output, 404, "application/json; charset=utf-8", "{\"error\":\"Not found\"}");
         }
     }
 
@@ -137,23 +165,32 @@ public class LocalShareServer {
             sendText(output, 400, "application/json; charset=utf-8", "{\"error\":\"Missing file name\"}");
             return;
         }
-        if (contentLength > MAX_UPLOAD_BYTES) {
-            sendText(output, 413, "application/json; charset=utf-8", "{\"error\":\"File too large\"}");
-            return;
-        }
 
         String fileName = safeFileName(urlDecode(encodedName));
         File target = uniqueFile(sharedDir, fileName);
+        // No size limit: the body is streamed straight to disk in 64 KB chunks.
         long remaining = contentLength;
         byte[] buffer = new byte[64 * 1024];
+        boolean complete = true;
 
         try (FileOutputStream fileOutput = new FileOutputStream(target)) {
             while (remaining > 0) {
                 int read = input.read(buffer, 0, (int) Math.min(buffer.length, remaining));
-                if (read == -1) break;
+                if (read == -1) {
+                    complete = false;
+                    break;
+                }
                 fileOutput.write(buffer, 0, read);
                 remaining -= read;
             }
+        } catch (IOException error) {
+            target.delete();
+            throw error;
+        }
+
+        if (!complete) {
+            target.delete();
+            return;
         }
 
         sendText(output, 201, "application/json; charset=utf-8", "{\"ok\":true}");
@@ -287,27 +324,6 @@ public class LocalShareServer {
         SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US);
         format.setTimeZone(TimeZone.getTimeZone("UTC"));
         return format.format(new Date(millis));
-    }
-
-    private String html() {
-        return "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
-                "<title>Local File Share</title><style>" +
-                "body{margin:0;background:#f6f8fb;color:#17202e;font-family:system-ui,-apple-system,Segoe UI,sans-serif}" +
-                "main{max-width:900px;margin:0 auto;padding:22px}h1{font-size:42px;line-height:1;margin:0 0 14px}" +
-                ".panel{background:#fff;border:1px solid #d9e0ea;border-radius:8px;padding:16px;margin:14px 0}" +
-                ".drop{border:2px dashed #afbdcb;border-radius:8px;padding:34px;text-align:center;background:#fbfdff}" +
-                "button,.btn{border:0;border-radius:7px;background:#0d766e;color:#fff;font-weight:800;padding:11px 14px;text-decoration:none;display:inline-block}" +
-                ".ghost{background:#fff;color:#17202e;border:1px solid #d9e0ea}.row{display:flex;gap:10px;align-items:center;justify-content:space-between;border:1px solid #d9e0ea;border-radius:8px;padding:12px;margin-top:10px}.meta{color:#687386;font-size:14px}.actions{display:flex;gap:8px;flex-wrap:wrap}@media(max-width:620px){.row{display:block}.actions{margin-top:10px}}" +
-                "</style></head><body><main><p style=\"color:#075f59;font-weight:800\">LOCAL NETWORK</p><h1>File Share</h1>" +
-                "<section class=\"panel\"><div class=\"drop\"><input id=\"file\" type=\"file\" multiple><p>Choose files to upload to this phone</p><button onclick=\"upload()\">Upload</button><p id=\"progress\" class=\"meta\"></p></div></section>" +
-                "<section class=\"panel\"><h2>Available files</h2><button class=\"ghost\" onclick=\"loadFiles()\">Refresh</button><div id=\"files\"></div></section>" +
-                "<script>" +
-                "const f=document.getElementById('files'),p=document.getElementById('progress');" +
-                "function bytes(n){if(!n)return'0 B';const u=['B','KB','MB','GB'];let i=Math.min(Math.floor(Math.log(n)/Math.log(1024)),3);return(n/1024**i).toFixed(i?1:0)+' '+u[i]}" +
-                "async function loadFiles(){let r=await fetch('/api/files');let d=await r.json();f.innerHTML=d.files.length?'':'<p class=meta>No files shared yet.</p>';d.files.forEach(x=>{let row=document.createElement('div');row.className='row';row.innerHTML='<div><b>'+x.name+'</b><div class=meta>'+bytes(x.size)+'</div></div><div class=actions><a class=btn href=\"'+x.url+'\">Download</a><button class=ghost data-name=\"'+x.name+'\">Delete</button></div>';row.querySelector('button').onclick=async()=>{await fetch('/api/files/'+encodeURIComponent(x.name),{method:'DELETE'});loadFiles()};f.append(row)})}" +
-                "async function upload(){let files=[...document.getElementById('file').files];for(const file of files){p.textContent='Uploading '+file.name;await fetch('/api/upload',{method:'POST',headers:{'x-file-name':encodeURIComponent(file.name)},body:file})}p.textContent='Done';loadFiles()}" +
-                "loadFiles();" +
-                "</script></main></body></html>";
     }
 
     private static class Request {

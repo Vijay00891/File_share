@@ -6,6 +6,7 @@ import android.content.ClipboardManager;
 import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
@@ -83,7 +84,7 @@ public class MainActivity extends Activity {
 
     private void buildUi() {
         ScrollView scrollView = new ScrollView(this);
-        scrollView.setBackgroundColor(color("#F6F8FB"));
+        scrollView.setBackgroundColor(color("#0B1020"));
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -91,12 +92,12 @@ public class MainActivity extends Activity {
         scrollView.addView(root);
 
         TextView eyebrow = label("LOCAL NETWORK");
-        TextView title = text("File Share", 36, "#17202E", true);
-        statusText = text("", 16, "#687386", true);
-        addressText = text("", 17, "#17202E", true);
+        TextView title = text("File Share", 36, "#EEF1FB", true);
+        statusText = text("", 16, "#97A1BF", true);
+        addressText = text("", 17, "#EEF1FB", true);
 
         LinearLayout panel = panel();
-        panel.addView(text("Server", 22, "#17202E", true));
+        panel.addView(text("Server", 22, "#EEF1FB", true));
         panel.addView(statusText);
         panel.addView(addressText);
 
@@ -116,7 +117,7 @@ public class MainActivity extends Activity {
         panel.addView(refreshButton);
 
         LinearLayout filesPanel = panel();
-        filesPanel.addView(text("Shared files", 22, "#17202E", true));
+        filesPanel.addView(text("Shared files", 22, "#EEF1FB", true));
         fileListView = new LinearLayout(this);
         fileListView.setOrientation(LinearLayout.VERTICAL);
         filesPanel.addView(fileListView);
@@ -132,7 +133,7 @@ public class MainActivity extends Activity {
         LinearLayout view = new LinearLayout(this);
         view.setOrientation(LinearLayout.VERTICAL);
         view.setPadding(dp(16), dp(16), dp(16), dp(16));
-        view.setBackgroundColor(Color.WHITE);
+        view.setBackground(rounded("#181E36", "#00000000", 20));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -143,7 +144,7 @@ public class MainActivity extends Activity {
     }
 
     private TextView label(String value) {
-        TextView view = text(value, 12, "#075F59", true);
+        TextView view = text(value, 12, "#19C3B1", true);
         view.setGravity(Gravity.START);
         return view;
     }
@@ -162,7 +163,8 @@ public class MainActivity extends Activity {
         Button button = new Button(this);
         button.setText(value);
         button.setTextColor(Color.WHITE);
-        button.setBackgroundColor(color("#0D766E"));
+        button.setBackground(gradient(14));
+        button.setStateListAnimator(null);
         button.setAllCaps(false);
         button.setPadding(0, dp(8), 0, dp(8));
         button.setLayoutParams(buttonParams());
@@ -172,7 +174,9 @@ public class MainActivity extends Activity {
     private Button secondaryButton(String value) {
         Button button = new Button(this);
         button.setText(value);
-        button.setTextColor(color("#17202E"));
+        button.setTextColor(color("#EEF1FB"));
+        button.setBackground(rounded("#252D4D", "#00000000", 14));
+        button.setStateListAnimator(null);
         button.setAllCaps(false);
         button.setPadding(0, dp(8), 0, dp(8));
         button.setLayoutParams(buttonParams());
@@ -199,7 +203,7 @@ public class MainActivity extends Activity {
         statusText.setText("Starting...");
         new Thread(() -> {
             try {
-                LocalShareServer nextServer = new LocalShareServer(PORT, sharedDir);
+                LocalShareServer nextServer = new LocalShareServer(getApplicationContext(), PORT, sharedDir);
                 nextServer.start();
                 server = nextServer;
                 runOnUiThread(() -> {
@@ -228,7 +232,7 @@ public class MainActivity extends Activity {
         File[] files = sharedDir.listFiles(file -> file.isFile());
         fileListView.removeAllViews();
         if (files == null || files.length == 0) {
-            fileListView.addView(text("No files shared yet.", 15, "#687386", false));
+            fileListView.addView(text("No files shared yet.", 15, "#97A1BF", false));
             return;
         }
 
@@ -242,8 +246,8 @@ public class MainActivity extends Activity {
         row.setOrientation(LinearLayout.VERTICAL);
         row.setPadding(0, dp(12), 0, dp(8));
 
-        TextView name = text(file.getName(), 16, "#17202E", true);
-        TextView meta = text(formatBytes(file.length()), 14, "#687386", false);
+        TextView name = text(file.getName(), 16, "#EEF1FB", true);
+        TextView meta = text(formatBytes(file.length()), 14, "#97A1BF", false);
 
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
@@ -400,6 +404,21 @@ public class MainActivity extends Activity {
             unit++;
         } while (value >= 1024 && unit < units.length - 1);
         return String.format(java.util.Locale.US, "%.1f %s", value, units[unit]);
+    }
+
+    private GradientDrawable gradient(int radiusDp) {
+        GradientDrawable drawable = new GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                new int[]{color("#6D5EFC"), color("#19A7E0")});
+        drawable.setCornerRadius(dp(radiusDp));
+        return drawable;
+    }
+
+    private GradientDrawable rounded(String fill, String stroke, int radiusDp) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(color(fill));
+        drawable.setCornerRadius(dp(radiusDp));
+        return drawable;
     }
 
     private int dp(int value) {

@@ -10,7 +10,6 @@ const PORT = Number(process.env.PORT || 3478);
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
 const STORAGE_DIR = path.join(ROOT, "shared-files");
-const MAX_UPLOAD_BYTES = Infinity;
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -34,16 +33,28 @@ function json(res, status, payload) {
   res.end(body);
 }
 
+const VIRTUAL_NAME = /vethernet|wsl|docker|virtual|vmware|vbox|hyper-v|loopback|tailscale|zerotier|bluetooth/i;
+
+// Lower score = more likely to be the address other devices on the Wi-Fi can reach.
+function addressScore(name, ip) {
+  if (VIRTUAL_NAME.test(name)) return 100;
+  if (ip.startsWith("192.168.")) return 0;
+  if (ip.startsWith("10.")) return 1;
+  if (/^172.(1[6-9]|2d|3[01])./.test(ip)) return 2;
+  if (ip.startsWith("169.254.")) return 90;
+  return 3;
+}
+
 function getLocalAddresses() {
-  const addresses = [];
-  for (const entries of Object.values(os.networkInterfaces())) {
+  const found = [];
+  for (const [name, entries] of Object.entries(os.networkInterfaces())) {
     for (const entry of entries || []) {
       if (entry.family === "IPv4" && !entry.internal) {
-        addresses.push(`http://${entry.address}:${PORT}`);
+        found.push({ score: addressScore(name, entry.address), url: `http://${entry.address}:${PORT}` });
       }
     }
   }
-  return addresses;
+  return found.sort((x, y) => x.score - y.score).map((item) => item.url);
 }
 
 function safeName(name) {
@@ -115,38 +126,38 @@ function sendStatic(req, res, pathname) {
 async function receiveUpload(req, res) {
   const nameHeader = req.headers["x-file-name"];
   const uploadName = Array.isArray(nameHeader) ? nameHeader[0] : nameHeader;
-  const length = Number(req.headers["content-length"] || 0);
 
   if (!uploadName) {
     json(res, 400, { error: "Missing file name" });
     return;
   }
 
-  if (length > MAX_UPLOAD_BYTES) {
-    json(res, 413, { error: "File is larger than the 1 GB limit" });
-    return;
-  }
-
-  const originalName = decodeURIComponent(uploadName);
-  const { filename, target } = await uniquePath(originalName);
+  // No size limit: the body is streamed straight to disk.
+  const { filename, target } = await uniquePath(decodeURIComponent(uploadName));
   const temp = `${target}.${crypto.randomUUID()}.uploading`;
   const out = fs.createWriteStream(temp, { flags: "wx" });
   let received = 0;
-  let tooLarge = false;
+  let failed = false;
+
+  const fail = async (status, message) => {
+    if (failed) return;
+    failed = true;
+    out.destroy();
+    await fsp.rm(temp, { force: true }).catch(() => {});
+    if (!res.headersSent) json(res, status, { error: message });
+  };
 
   req.on("data", (chunk) => {
     received += chunk.length;
-    if (received > MAX_UPLOAD_BYTES) {
-      tooLarge = true;
-      req.destroy();
-      out.destroy();
-    }
   });
+  req.on("error", () => fail(500, "Upload interrupted"));
+  req.on("aborted", () => fail(499, "Upload cancelled"));
+  out.on("error", () => fail(500, "Upload failed"));
 
   req.pipe(out);
 
   out.on("finish", async () => {
-    if (tooLarge) return;
+    if (failed) return;
     await fsp.rename(temp, target);
     json(res, 201, {
       file: {
@@ -156,20 +167,6 @@ async function receiveUpload(req, res) {
         url: fileUrl(filename)
       }
     });
-  });
-
-  out.on("error", async () => {
-    await fsp.rm(temp, { force: true }).catch(() => {});
-    if (!res.headersSent) json(res, 500, { error: "Upload failed" });
-  });
-
-  req.on("error", async () => {
-    await fsp.rm(temp, { force: true }).catch(() => {});
-    if (!res.headersSent) {
-      json(res, tooLarge ? 413 : 500, {
-        error: tooLarge ? "File is larger than the 1 GB limit" : "Upload interrupted"
-      });
-    }
   });
 }
 
@@ -238,7 +235,12 @@ async function route(req, res) {
 }
 
 fsp.mkdir(STORAGE_DIR, { recursive: true }).then(() => {
-  http.createServer(route).listen(PORT, "0.0.0.0", () => {
+  const server = http.createServer(route);
+  // Disable timeouts so very large uploads are never cut off.
+  server.requestTimeout = 0;
+  server.headersTimeout = 0;
+  server.timeout = 0;
+  server.listen(PORT, "0.0.0.0", () => {
     console.log("Local File Share is running");
     console.log(`  This device: http://localhost:${PORT}`);
     for (const address of getLocalAddresses()) console.log(`  Network:     ${address}`);

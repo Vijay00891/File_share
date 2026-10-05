@@ -10,7 +10,21 @@ android {
         applicationId "com.vijay.localfileshare"
         minSdk 23
         targetSdk 35
-        versionCode 1
-        versionName "1.0"
+        versionCode 2
+        versionName "2.0"
     }
+
+    sourceSets {
+        main.assets.srcDirs += layout.buildDirectory.dir("webAssets")
+    }
+}
+
+// The phone serves the same web UI as the Node server: bundle ../../public as assets/public.
+tasks.register("syncWebAssets", Copy) {
+    from "${rootDir}/../public"
+    into layout.buildDirectory.dir("webAssets/public")
+}
+
+tasks.matching { it.name == "preBuild" }.configureEach {
+    dependsOn "syncWebAssets"
 }
