@@ -1,35 +1,15 @@
-# Local File Share
+Hey everyone,
 
-Share files with nearby devices on the same local network.
+want to share files On high speed?
 
-## Run
+Try File share, give around 40MB/s speed to share files.
 
-```powershell
-npm start
-```
+1. go to this repo https://github.com/Vijay00891/File_share
+2. click on releases.
+3. download new-app-debug.apk
+4. start server
+5. share URL from screen to other user
+6. and enjoy highspeed file sharing .
 
-The app runs at:
 
-```text
-http://localhost:3478
-```
 
-The terminal also prints one or more network addresses, such as:
-
-```text
-http://192.168.0.107:3478
-```
-
-Open that network address from another phone, tablet, or computer connected to the same Wi-Fi.
-
-## Notes
-
-- Uploaded files are saved in `shared-files`.
-- The default port is `3478`.
-- To use another port:
-
-```powershell
-$env:PORT=8080; npm start
-```
-
-- Windows Firewall may ask whether to allow Node.js on private networks. Allow it for other local devices to connect.
