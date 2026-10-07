@@ -261,7 +261,7 @@ class PickerView {
 
     private void styleTab(TextView view, boolean active) {
         view.setBackground(Ui.ripple(activity, active ? Ui.PRIMARY : Ui.SURFACE, 20));
-        view.setTextColor(active ? 0xFFFFFFFF : Ui.INK);
+        view.setTextColor(active ? Ui.ON_PRIMARY : Ui.INK);
     }
 
     private void addChip(LinearLayout chips, String label, File dir) {
@@ -400,7 +400,7 @@ class PickerView {
         holder.check.setFocusable(false);
         holder.check.setButtonTintList(new ColorStateList(
                 new int[][]{{android.R.attr.state_checked}, {}},
-                new int[]{Ui.PRIMARY, 0xFFB4BCC9}));
+                new int[]{Ui.PRIMARY, Ui.MUTED}));
         row.addView(holder.check);
 
         row.setTag(holder);

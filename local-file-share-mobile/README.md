@@ -7,6 +7,9 @@ Native Android app for sharing files without the internet.
 - **Share to desktop** – starts a small web server on the phone. Open the shown address in a computer's browser (same Wi-Fi) to upload and download files.
 - **Share to phone → Send** – creates a direct Wi-Fi link (Wi-Fi Direct) that the other phone joins. Optional *High-speed transfer* asks for the 5 GHz band and falls back to 2.4 GHz if the phone refuses.
 - **Share to phone → Receive** – finds nearby senders, joins the one you tap, then lets you save the sender's files and send files back.
+- **QR code** – the sender screen shows a QR code; the receiver can tap *Scan QR code* to connect without searching. The desktop screen shows a QR code of its address too.
+- **Runs in the background** – once a share is running it keeps going after you leave the app, with an ongoing notification that has a *Stop sharing* button. Reopening the app returns to the live share.
+- **Light and dark** – the app and the web page follow the device's theme.
 - **Built-in picker** – browse phone storage (with image thumbnails) or pick installed apps (with icons). Needs the "All files access" permission.
 
 Files received are saved in `Download/LocalShare` when file access is allowed, otherwise in the app's own folder.
@@ -22,7 +25,7 @@ Files received are saved in `Download/LocalShare` when file access is allowed, o
 
 ## Build
 
-Uses Android Gradle Plugin `8.7.3`, `compileSdk 35`, Java, no third-party libraries.
+Uses Android Gradle Plugin `8.7.3`, `compileSdk 35`, Java. The only library is ZXing `core` for QR codes.
 
 ```text
 gradle assembleDebug

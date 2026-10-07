@@ -10,8 +10,8 @@ android {
         applicationId "com.vijay.localfileshare"
         minSdk 23
         targetSdk 35
-        versionCode 3
-        versionName "3.0"
+        versionCode 4
+        versionName "3.1"
     }
 
     compileOptions {
@@ -31,4 +31,9 @@ tasks.register("syncWebAssets", Copy) {
 
 tasks.matching { it.name == "preBuild" }.configureEach {
     dependsOn "syncWebAssets"
+}
+
+dependencies {
+    // QR code encoding and decoding (pure Java, no Android dependencies).
+    implementation "com.google.zxing:core:3.5.3"
 }

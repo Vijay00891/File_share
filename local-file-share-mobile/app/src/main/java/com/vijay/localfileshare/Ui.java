@@ -2,6 +2,7 @@ package com.vijay.localfileshare;
 
 import android.content.Context;
 import android.content.res.ColorStateList;
+import android.content.res.Configuration;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
@@ -17,15 +18,42 @@ import java.util.Locale;
 
 /** Shared look for every screen: colours, cards, buttons and small layout helpers. */
 final class Ui {
-    static final int BG = 0xFFF2F5FB;
-    static final int SURFACE = 0xFFFFFFFF;
-    static final int PRIMARY = 0xFF1463FF;
-    static final int PRIMARY_SOFT = 0xFFE3ECFF;
-    static final int INK = 0xFF14181F;
-    static final int MUTED = 0xFF5D6675;
-    static final int LINE = 0xFFE1E6EF;
-    static final int DANGER = 0xFFD93025;
-    static final int OK = 0xFF1E8E5A;
+    // Set by applyTheme() to the light or dark palette; never cache these across screens.
+    static int BG;
+    static int SURFACE;
+    static int PRIMARY;
+    static int PRIMARY_SOFT;
+    static int ON_PRIMARY;
+    static int INK;
+    static int MUTED;
+    static int LINE;
+    static int DANGER;
+    static int OK;
+    private static int RIPPLE;
+
+    static {
+        setPalette(false);
+    }
+
+    /** Follows the phone's light or dark setting. Call before building any views. */
+    static void applyTheme(Context c) {
+        int night = c.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
+        setPalette(night == Configuration.UI_MODE_NIGHT_YES);
+    }
+
+    private static void setPalette(boolean dark) {
+        BG = dark ? 0xFF0F1218 : 0xFFF2F5FB;
+        SURFACE = dark ? 0xFF1A1F29 : 0xFFFFFFFF;
+        PRIMARY = dark ? 0xFF7AA2FF : 0xFF1463FF;
+        PRIMARY_SOFT = dark ? 0xFF1F2C4D : 0xFFE3ECFF;
+        ON_PRIMARY = dark ? 0xFF0B1220 : 0xFFFFFFFF;
+        INK = dark ? 0xFFE8ECF4 : 0xFF14181F;
+        MUTED = dark ? 0xFF9AA4B5 : 0xFF5D6675;
+        LINE = dark ? 0xFF2A3140 : 0xFFE1E6EF;
+        DANGER = dark ? 0xFFFF6B60 : 0xFFD93025;
+        OK = dark ? 0xFF4CC38A : 0xFF1E8E5A;
+        RIPPLE = dark ? 0x33FFFFFF : 0x22000000;
+    }
 
     static final int MATCH = LinearLayout.LayoutParams.MATCH_PARENT;
     static final int WRAP = LinearLayout.LayoutParams.WRAP_CONTENT;
@@ -45,7 +73,7 @@ final class Ui {
     }
 
     static Drawable ripple(Context c, int color, float radiusDp) {
-        return new RippleDrawable(ColorStateList.valueOf(0x22000000), shape(c, color, radiusDp), shape(c, 0xFFFFFFFF, radiusDp));
+        return new RippleDrawable(ColorStateList.valueOf(RIPPLE), shape(c, color, radiusDp), shape(c, 0xFFFFFFFF, radiusDp));
     }
 
     static TextView text(Context c, CharSequence value, float sp, int color, boolean bold) {
@@ -85,7 +113,7 @@ final class Ui {
     }
 
     static TextView button(Context c, String label, boolean primary) {
-        TextView view = text(c, label, 15, primary ? 0xFFFFFFFF : PRIMARY, true);
+        TextView view = text(c, label, 15, primary ? ON_PRIMARY : PRIMARY, true);
         view.setGravity(Gravity.CENTER);
         view.setPadding(dp(c, 22), dp(c, 13), dp(c, 22), dp(c, 13));
         view.setBackground(ripple(c, primary ? PRIMARY : PRIMARY_SOFT, 28));

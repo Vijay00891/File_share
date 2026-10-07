@@ -3,8 +3,9 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <meta name="theme-color" content="#f4f5f2">
-    <title>Local File Share</title>
+    <meta name="theme-color" content="#f2f5fb" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#0f1218" media="(prefers-color-scheme: dark)">
+    <title>Local Share</title>
     <link rel="icon" type="image/png" href="/logo.png">
     <link rel="stylesheet" href="/styles.css">
   </head>
@@ -12,8 +13,9 @@
     <main class="shell">
       <header class="topbar">
         <div class="brand">
+          <img class="logo" src="/logo.png" alt="" width="48" height="48">
           <div>
-            <h1>Local File Share</h1>
+            <h1>Local Share</h1>
             <p>Share files with devices on the same Wi-Fi</p>
           </div>
         </div>
@@ -24,7 +26,8 @@
         <div class="card upload-card">
           <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Choose files to upload">
             <input id="fileInput" type="file" multiple hidden>
-                        <h2>Drop files here</h2>
+            <span class="icon-circle" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z"/></svg></span>
+            <h2>Drop files here</h2>
             <p>or choose them from this device. No size limit.</p>
             <button class="btn primary" id="chooseButton" type="button">Choose files</button>
           </div>

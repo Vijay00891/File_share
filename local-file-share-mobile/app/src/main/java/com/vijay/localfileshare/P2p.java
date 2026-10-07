@@ -311,6 +311,11 @@ class P2p {
 
     // ---- Shared ----
 
+    /** Swaps the listener, e.g. once the screen that started the link is gone. */
+    void setEvents(Events listener) {
+        events = listener;
+    }
+
     private boolean begin(Mode next, Events listener) {
         stop();
         events = listener;

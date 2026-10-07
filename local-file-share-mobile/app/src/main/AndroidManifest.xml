@@ -6,6 +6,12 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
 
+    <!-- Keeps sharing alive after the user leaves the app. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <!-- Wi-Fi Direct: location permission before Android 13, nearby-devices permission after. -->
     <uses-permission
         android:name="android.permission.ACCESS_FINE_LOCATION"
@@ -29,6 +35,12 @@
         android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
 
+    <!-- Scanning the sender's QR code. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+
     <uses-feature
         android:name="android.hardware.wifi.direct"
         android:required="false" />
@@ -51,12 +63,18 @@
         android:usesCleartextTraffic="true">
         <activity
             android:name=".MainActivity"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
-            android:exported="true">
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:exported="true"
+            android:launchMode="singleTask">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <service
+            android:name=".ShareService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice"
+            tools:targetApi="29" />
     </application>
 </manifest>

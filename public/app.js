@@ -68,7 +68,7 @@ async function copy(text) {
 function drawQr(text) {
   const canvas = $("#qr");
   try {
-    QRCode.toCanvas(canvas, text, { foreground: "#131a2e", background: "#ffffff" });
+    QRCode.toCanvas(canvas, text, { foreground: "#14181f", background: "#ffffff" });
   } catch {
     canvas.parentElement.hidden = true;
   }
