@@ -1,33 +1,31 @@
-# Local File Share Mobile
+# Local Share (Android)
 
-Native Android app that starts a local HTTP server on the phone so nearby devices on the same Wi-Fi can upload and download files.
+Native Android app for sharing files without the internet.
 
-## Features
+## What it does
 
-- Start and stop the local server from the app.
-- Show and copy the phone's LAN URL.
-- Pick files from the phone and add them to the shared folder.
-- Pick installed apps and share their APKs (base APK only; split-APK apps need all parts).
-- Other devices can open the URL in a browser to upload, download, refresh, and delete files.
-- Files are stored in the app's external files directory.
+- **Share to desktop** – starts a small web server on the phone. Open the shown address in a computer's browser (same Wi-Fi) to upload and download files.
+- **Share to phone → Send** – creates a direct Wi-Fi link (Wi-Fi Direct) that the other phone joins. Optional *High-speed transfer* asks for the 5 GHz band and falls back to 2.4 GHz if the phone refuses.
+- **Share to phone → Receive** – finds nearby senders, joins the one you tap, then lets you save the sender's files and send files back.
+- **Built-in picker** – browse phone storage (with image thumbnails) or pick installed apps (with icons). Needs the "All files access" permission.
+
+Files received are saved in `Download/LocalShare` when file access is allowed, otherwise in the app's own folder.
+
+## Things to know
+
+- Phone-to-phone sharing needs Android 10+ and Wi-Fi Direct on both phones.
+- Android 10+ does not let apps switch Wi-Fi on silently; the app opens the system Wi-Fi panel instead.
+- Before Android 13, finding nearby phones needs the Location permission and Location switched on.
+- The direct link's password is derived from its name so the receiver can join with one tap. It is convenient, not private: anyone nearby with this app can join while you are sending.
+- Installed apps are shared as their base APK only; apps installed as split APKs may not install from that file alone.
+- "All files access" is fine for a sideloaded APK but restricted on Google Play.
 
 ## Build
 
-Open this folder in Android Studio:
+Uses Android Gradle Plugin `8.7.3`, `compileSdk 35`, Java, no third-party libraries.
 
 ```text
-outputs/local-file-share-mobile
+gradle assembleDebug
 ```
 
-Then run the `app` configuration on a device.
-
-The project uses Android Gradle Plugin `8.7.3`, `compileSdk 35`, and Java source.
-
-## Use
-
-1. Connect the phone and the other device to the same Wi-Fi.
-2. Open the app and tap `Start server`.
-3. Open the displayed address, for example `http://192.168.0.107:3478`, on the other device.
-4. Upload or download files locally.
-
-If the URL does not open from another device, check that the devices are on the same network and that the network allows device-to-device traffic.
+The web UI in `../public` is bundled into the APK automatically at build time.

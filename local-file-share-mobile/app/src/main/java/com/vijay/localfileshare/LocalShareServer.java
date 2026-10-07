@@ -9,6 +9,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URLDecoder;
@@ -16,7 +17,10 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TimeZone;
@@ -31,6 +35,71 @@ public class LocalShareServer {
     private volatile boolean running;
     private ServerSocket serverSocket;
     private Thread acceptThread;
+    // What this session shares: files the user picked (served from where they are)
+    // and files other devices uploaded (saved into sharedDir).
+    private final Map<String, Entry> entries = new LinkedHashMap<>();
+
+    public static class Entry {
+        public final String name;
+        public final File file;
+        public final boolean received;
+
+        Entry(String name, File file, boolean received) {
+            this.name = name;
+            this.file = file;
+            this.received = received;
+        }
+    }
+
+    /** Shares a file in place under the given display name. */
+    public void link(String name, File file) {
+        synchronized (entries) {
+            for (Entry entry : entries.values()) {
+                if (entry.file.equals(file)) return;
+            }
+            String unique = uniqueName(safeFileName(name));
+            entries.put(unique, new Entry(unique, file, false));
+        }
+    }
+
+    public List<Entry> entries() {
+        synchronized (entries) {
+            return new ArrayList<>(entries.values());
+        }
+    }
+
+    /** Stops sharing a file. Files received from other devices are also deleted. */
+    public void remove(String name) {
+        Entry entry;
+        synchronized (entries) {
+            entry = entries.remove(name);
+        }
+        if (entry != null && entry.received) entry.file.delete();
+    }
+
+    private Entry find(String name) {
+        synchronized (entries) {
+            return entries.get(name);
+        }
+    }
+
+    // Callers hold the entries lock.
+    private String uniqueName(String name) {
+        if (!entries.containsKey(name)) return name;
+        String base = name;
+        String ext = "";
+        int dot = name.lastIndexOf(".");
+        if (dot > 0) {
+            base = name.substring(0, dot);
+            ext = name.substring(dot);
+        }
+        int count = 1;
+        String candidate;
+        do {
+            candidate = base + " (" + count++ + ")" + ext;
+        } while (entries.containsKey(candidate));
+        return candidate;
+    }
 
     public LocalShareServer(android.content.Context context, int port, File sharedDir) {
         this.context = context;
@@ -40,7 +109,9 @@ public class LocalShareServer {
 
     public void start() throws IOException {
         if (!sharedDir.exists()) sharedDir.mkdirs();
-        serverSocket = new ServerSocket(port);
+        serverSocket = new ServerSocket();
+        serverSocket.setReuseAddress(true);
+        serverSocket.bind(new InetSocketAddress(port));
         running = true;
         acceptThread = new Thread(() -> {
             while (running) {
@@ -195,19 +266,24 @@ public class LocalShareServer {
             return;
         }
 
+        synchronized (entries) {
+            String unique = uniqueName(target.getName());
+            entries.put(unique, new Entry(unique, target, true));
+        }
+
         sendText(output, 201, "application/json; charset=utf-8", "{\"ok\":true}");
     }
 
     private void download(OutputStream output, String rawName) throws IOException {
-        File file = new File(sharedDir, safeFileName(urlDecode(rawName)));
-        if (!file.exists() || !file.isFile()) {
+        Entry entry = find(urlDecode(rawName));
+        if (entry == null || !entry.file.isFile()) {
             sendText(output, 404, "application/json; charset=utf-8", "{\"error\":\"File not found\"}");
             return;
         }
 
-        String disposition = "attachment; filename*=UTF-8''" + urlEncode(file.getName());
-        writeHeaders(output, 200, "application/octet-stream", file.length(), disposition);
-        try (FileInputStream fileInput = new FileInputStream(file)) {
+        String disposition = "attachment; filename*=UTF-8''" + urlEncode(entry.name);
+        writeHeaders(output, 200, "application/octet-stream", entry.file.length(), disposition);
+        try (FileInputStream fileInput = new FileInputStream(entry.file)) {
             byte[] buffer = new byte[64 * 1024];
             int read;
             while ((read = fileInput.read(buffer)) != -1) {
@@ -218,26 +294,24 @@ public class LocalShareServer {
     }
 
     private void delete(OutputStream output, String rawName) throws IOException {
-        File file = new File(sharedDir, safeFileName(urlDecode(rawName)));
-        if (file.exists() && file.isFile()) file.delete();
+        remove(urlDecode(rawName));
         sendText(output, 200, "application/json; charset=utf-8", "{\"ok\":true}");
     }
 
     private String filesJson() {
         StringBuilder builder = new StringBuilder();
         builder.append("{\"files\":[");
-        File[] files = sharedDir.listFiles(file -> file.isFile());
-        if (files != null) {
-            for (int i = 0; i < files.length; i++) {
-                if (i > 0) builder.append(",");
-                File file = files[i];
-                builder.append("{")
-                        .append("\"name\":\"").append(jsonEscape(file.getName())).append("\",")
-                        .append("\"size\":").append(file.length()).append(",")
-                        .append("\"modified\":\"").append(isoDate(file.lastModified())).append("\",")
-                        .append("\"url\":\"/download/").append(urlEncode(file.getName())).append("\"")
-                        .append("}");
-            }
+        boolean first = true;
+        for (Entry entry : entries()) {
+            if (!entry.file.isFile()) continue;
+            if (!first) builder.append(",");
+            first = false;
+            builder.append("{")
+                    .append("\"name\":\"").append(jsonEscape(entry.name)).append("\",")
+                    .append("\"size\":").append(entry.file.length()).append(",")
+                    .append("\"modified\":\"").append(isoDate(entry.file.lastModified())).append("\",")
+                    .append("\"url\":\"/download/").append(urlEncode(entry.name)).append("\"")
+                    .append("}");
         }
         builder.append("]}");
         return builder.toString();

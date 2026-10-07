@@ -1,9 +1,5 @@
 <resources>
-    <color name="bg">#0B1020</color>
-    <color name="ink">#EEF1FB</color>
-    <color name="muted">#97A1BF</color>
-    <color name="accent">#6D5EFC</color>
-    <color name="accent_dark">#19C3B1</color>
-    <color name="line">#252D4D</color>
-    <color name="panel">#181E36</color>
+    <color name="bg">#F2F5FB</color>
+    <color name="ink">#14181F</color>
+    <color name="accent">#1463FF</color>
 </resources>
