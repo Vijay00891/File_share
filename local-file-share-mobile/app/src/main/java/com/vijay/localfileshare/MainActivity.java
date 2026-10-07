@@ -403,7 +403,7 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
 
         File saveDir = Session.saveDir != null ? Session.saveDir : receiveDir();
         body.addView(Ui.margin(this, Ui.text(this,
-                "Files sent to this phone are saved in " + describeDir(saveDir) + ".\n"
+                "Tap a file to open it. Files sent to this phone are saved in " + describeDir(saveDir) + ".\n"
                         + "Sharing keeps running if you leave the app. Stop it here or from the notification.",
                 13, Ui.MUTED, false), 6, 14, 6, 0));
 
@@ -488,6 +488,9 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
                 refreshHostFiles();
             });
             row.addView(remove, Ui.lp(dp(40), dp(40)));
+            row.setBackground(Ui.ripple(this, Ui.SURFACE, 16));
+            row.setClickable(true);
+            row.setOnClickListener(v -> FileOpener.open(this, entry.file));
             hostFiles.addView(row);
         }
     }
@@ -772,6 +775,7 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
         Session.addTransfer(file.name, false, progress -> {
             File saved = PeerClient.download(base, file, dir, progress);
             MediaScannerConnection.scanFile(app, new String[]{saved.getPath()}, null, null);
+            return saved;
         });
         renderTransfers();
     }
@@ -796,7 +800,7 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
                     break;
                 case Session.Transfer.DONE:
                     views.bar.setProgress(1000);
-                    views.state.setText(transfer.upload ? "Sent" : "Saved");
+                    views.state.setText(transfer.upload ? "Sent" : "Saved  ·  tap to open");
                     views.state.setTextColor(Ui.OK);
                     break;
                 case Session.Transfer.FAILED:
@@ -826,6 +830,11 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
         views.bar.setMax(1000);
         views.bar.setProgressTintList(ColorStateList.valueOf(Ui.PRIMARY));
         row.addView(Ui.margin(this, views.bar, 0, 8, 0, 0));
+        row.setBackground(Ui.ripple(this, Ui.SURFACE, 24));
+        row.setClickable(true);
+        row.setOnClickListener(v -> {
+            if (transfer.state == Session.Transfer.DONE && transfer.file != null) FileOpener.open(this, transfer.file);
+        });
         // Newest on top.
         transfersBox.addView(Ui.margin(this, row, 0, 0, 0, 8), 0);
         return views;
@@ -868,7 +877,10 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
             for (PickerView.Item item : items) {
                 String name = item.name;
                 File file = item.file;
-                Session.addTransfer(name, true, progress -> PeerClient.upload(base, name, file, progress));
+                Session.addTransfer(name, true, progress -> {
+                    PeerClient.upload(base, name, file, progress);
+                    return null;
+                });
             }
             renderTransfers();
         }

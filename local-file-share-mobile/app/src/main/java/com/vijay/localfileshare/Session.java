@@ -16,7 +16,8 @@ final class Session {
     enum Kind { NONE, DESKTOP, PHONE_SEND, PHONE_RECEIVE }
 
     interface Job {
-        void run(PeerClient.Progress progress) throws Exception;
+        /** Returns the saved file for a download, or null for an upload. */
+        File run(PeerClient.Progress progress) throws Exception;
     }
 
     static class Transfer {
@@ -30,6 +31,8 @@ final class Session {
         volatile long done;
         volatile long total;
         volatile int state = WAITING;
+        /** Where a finished download was saved. */
+        volatile File file;
 
         Transfer(String name, boolean upload) {
             this.name = name;
@@ -125,7 +128,7 @@ final class Session {
         transferQueue.execute(() -> {
             transfer.state = Transfer.RUNNING;
             try {
-                job.run((done, total) -> {
+                transfer.file = job.run((done, total) -> {
                     transfer.done = done;
                     transfer.total = total;
                 });

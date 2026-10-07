@@ -35,6 +35,9 @@
         android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
 
+    <!-- Opening a received APK starts the installer. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <!-- Scanning the sender's QR code. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature
@@ -71,6 +74,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <provider
+            android:name=".FileOpener"
+            android:authorities="com.vijay.localfileshare.files"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
         <service
             android:name=".ShareService"
             android:exported="false"
