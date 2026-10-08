@@ -37,7 +37,7 @@ public class ShareService extends Service {
                 stopSelf();
                 return;
             }
-            if (Session.kind == Session.Kind.PHONE_SEND && Session.p2p != null) Session.p2p.pollHost();
+            Session.pollHost();
             if (!Session.summary().equals(shownSummary)) {
                 NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
                 if (manager != null) manager.notify(NOTIFICATION_ID, buildNotification());

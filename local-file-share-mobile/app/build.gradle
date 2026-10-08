@@ -10,12 +10,16 @@ android {
         applicationId "com.vijay.localfileshare"
         minSdk 23
         targetSdk 35
-        versionCode 4
-        versionName "3.1"
+        versionCode 5
+        versionName "3.2"
     }
 
     compileOptions {
         encoding "UTF-8"
+    }
+
+    testOptions {
+        unitTests.returnDefaultValues = true
     }
 
     sourceSets {
@@ -36,4 +40,8 @@ tasks.matching { it.name == "preBuild" }.configureEach {
 dependencies {
     // QR code encoding and decoding (pure Java, no Android dependencies).
     implementation "com.google.zxing:core:3.5.3"
+
+    testImplementation "junit:junit:4.13.2"
+    // Real JSON parser for JVM tests; on the phone Android provides it.
+    testImplementation "org.json:json:20240303"
 }

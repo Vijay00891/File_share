@@ -6,6 +6,7 @@ import android.animation.PropertyValuesHolder;
 import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.bluetooth.BluetoothAdapter;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -37,11 +38,14 @@ import android.widget.Toast;
 import java.io.File;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -55,6 +59,7 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
     private static final int REQ_WIFI_PANEL = 52;
     private static final int REQ_STORAGE = 53;
     private static final int REQ_NOTIFICATIONS = 54;
+    private static final int REQ_BLUETOOTH = 55;
 
     private enum Screen { HOME, PHONE, HOST, FIND, PEER }
 
@@ -71,6 +76,9 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
     private ScannerView scanner;
     private Runnable afterPermission;
     private Runnable afterWifi;
+    private Runnable afterBluetooth;
+    /** The one permission the pending step cannot work without; others asked alongside are optional. */
+    private String requiredPermission;
 
     // Host screen (share to desktop, or send to phone)
     private TextView hostTitle;
@@ -88,6 +96,7 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
     private ValueAnimator pulse;
     private boolean joining;
     private String joiningName = "";
+    private final Set<String> foundSenders = new HashSet<>();
 
     // Receive: connected to a sender
     private TextView peerStatus;
@@ -113,7 +122,7 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
             }
             if (screen == Screen.HOST) {
                 refreshHostFiles();
-                if (Session.p2p != null) Session.p2p.pollHost();
+                Session.pollHost();
                 showHostStatus();
             } else {
                 pollPeer();
@@ -269,35 +278,38 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
 
     private void showSendDialog() {
         if (!phoneLinkSupported()) return;
-        boolean fiveGhzSupported = wifiManager().is5GHzBandSupported();
+        boolean canHighSpeed = P2p.supported(this) && wifiManager().is5GHzBandSupported();
 
         LinearLayout box = Ui.column(this);
         box.setPadding(dp(24), dp(12), dp(24), 0);
         box.addView(Ui.text(this,
-                "This phone creates a direct Wi-Fi link. On the other phone, open Local Share and tap Share to phone, then Receive.",
+                "This phone turns on a hotspot for the other phone to join. On the other phone, open Local Share and tap Share to phone, then Receive.",
                 15, Ui.MUTED, false));
         CheckBox highSpeed = new CheckBox(this);
         highSpeed.setText("High-speed transfer (5 GHz)");
         highSpeed.setTextSize(16);
         highSpeed.setTextColor(Ui.INK);
         highSpeed.setButtonTintList(ColorStateList.valueOf(Ui.PRIMARY));
-        highSpeed.setEnabled(fiveGhzSupported);
+        highSpeed.setEnabled(canHighSpeed);
         box.addView(Ui.margin(this, highSpeed, -6, 16, 0, 0));
-        box.addView(Ui.margin(this, Ui.text(this, fiveGhzSupported
-                ? "Faster, with a shorter range. Both phones need 5 GHz Wi-Fi."
-                : "This phone's Wi-Fi doesn't support 5 GHz.", 13, Ui.MUTED, false), 26, 0, 0, 0));
+        box.addView(Ui.margin(this, Ui.text(this, canHighSpeed
+                ? "Uses Wi-Fi Direct on the faster 5 GHz band instead of the hotspot. Needs Wi-Fi switched on, and both phones must support 5 GHz."
+                : "This phone doesn't support 5 GHz Wi-Fi Direct.", 13, Ui.MUTED, false), 26, 0, 0, 0));
 
         new AlertDialog.Builder(this)
                 .setTitle("Send to a phone")
                 .setView(box)
-                .setPositiveButton("Start", (dialog, which) ->
-                        withNearbyPermission(() -> withWifiOn(() -> startHost(true, highSpeed.isChecked()))))
+                .setPositiveButton("Start", (dialog, which) -> withNearbyPermission(() -> withBluetoothOn(() -> {
+                    // The hotspot works with Wi-Fi off; only Wi-Fi Direct needs it on.
+                    if (highSpeed.isChecked()) withWifiOn(() -> startHost(true, true));
+                    else startHost(true, false);
+                })))
                 .setNegativeButton("Cancel", null)
                 .show();
     }
 
     /** Starts the share in {@link Session}, then shows it. */
-    private void startHost(boolean phone, boolean fiveGhz) {
+    private void startHost(boolean phone, boolean highSpeed) {
         endSession();
         File saveDir = receiveDir();
         LocalShareServer started = new LocalShareServer(getApplicationContext(), PORT, saveDir);
@@ -314,11 +326,7 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
             }
         }, "server-start").start();
 
-        if (phone) {
-            P2p link = new P2p(this);
-            Session.p2p = link;
-            link.startHost(deviceName(), fiveGhz, Session.hostEvents(fiveGhz));
-        }
+        if (phone) Session.startSend(this, deviceName(), highSpeed);
         runInBackground();
         showHostScreen();
     }
@@ -499,7 +507,7 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
 
     private void beginReceive() {
         if (!phoneLinkSupported()) return;
-        withNearbyPermission(() -> withWifiOn(this::startFind));
+        withNearbyPermission(() -> withWifiOn(() -> withBluetoothOn(this::startFind)));
     }
 
     private void startFind() {
@@ -545,33 +553,52 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
         findList = Ui.column(this);
         body.addView(findList, Ui.lp(Ui.MATCH, Ui.WRAP));
 
-        P2p link = new P2p(this);
         Session.kind = Session.Kind.PHONE_RECEIVE;
-        Session.p2p = link;
-        link.startFind(new P2p.Events() {
-            @Override
-            void onFound(String networkName, String displayName) {
-                if (screen == Screen.FIND && !joining) addSender(networkName, displayName);
-            }
+        foundSenders.clear();
 
-            @Override
-            void onConnected(String hostAddress) {
-                if (screen == Screen.FIND && Session.p2p == link) connectedTo(hostAddress);
-            }
-
-            @Override
-            void onError(String message) {
-                if (screen != Screen.FIND || Session.p2p != link) return;
-                joining = false;
-                findList.removeAllViews();
-                findList.setAlpha(1f);
-                findStatus.setText("Looking for nearby senders…");
-                toast(message);
-            }
+        // Senders announce themselves over Bluetooth, tagged for this app only.
+        Beacon nearby = new Beacon(this);
+        Session.beacon = nearby;
+        boolean listening = nearby.scan(target -> {
+            if (screen == Screen.FIND && Session.beacon == nearby) addSender(target);
         });
+        if (!listening) {
+            hint.setText("Bluetooth is off, so nearby senders may not show up. Scan the sender's QR code instead.");
+        }
+
+        // High-speed senders use Wi-Fi Direct and can also be found over Wi-Fi.
+        if (P2p.supported(this)) {
+            P2p link = new P2p(this);
+            Session.p2p = link;
+            link.startFind(new P2p.Events() {
+                @Override
+                void onFound(String networkName, String displayName) {
+                    if (screen == Screen.FIND && Session.p2p == link) addSender(Target.direct(networkName));
+                }
+
+                @Override
+                void onConnected(String hostAddress) {
+                    if (screen == Screen.FIND && Session.p2p == link) connectedTo(hostAddress);
+                }
+
+                @Override
+                void onError(String message) {
+                    if (screen != Screen.FIND || Session.p2p != link) return;
+                    joining = false;
+                    foundSenders.clear();
+                    findList.removeAllViews();
+                    findList.setAlpha(1f);
+                    findStatus.setText("Looking for nearby senders…");
+                    toast(message);
+                }
+            });
+        }
     }
 
-    private void addSender(String networkName, String displayName) {
+    private void addSender(Target target) {
+        if (joining || target == null || !foundSenders.add(target.ssid)) return;
+        String displayName = target.displayName();
+
         LinearLayout row = Ui.row(this);
         row.setBackground(Ui.ripple(this, Ui.SURFACE, 24));
         row.setPadding(dp(16), dp(14), dp(16), dp(14));
@@ -585,21 +612,54 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
         LinearLayout texts = Ui.column(this);
         texts.setPadding(dp(14), 0, 0, 0);
         texts.addView(Ui.oneLine(Ui.text(this, displayName, 17, Ui.INK, true)));
-        texts.addView(Ui.text(this, "Tap to connect", 14, Ui.MUTED, false));
+        texts.addView(Ui.text(this, target.kind == Target.DIRECT ? "High speed  ·  tap to connect" : "Tap to connect", 14, Ui.MUTED, false));
         row.addView(texts, Ui.weighted());
 
-        row.setOnClickListener(v -> join(networkName, displayName));
+        row.setOnClickListener(v -> join(target));
         findList.addView(Ui.margin(this, row, 0, 0, 0, 10));
     }
 
     /** Joins a sender picked from the list or read from its QR code. */
-    private void join(String networkName, String displayName) {
-        if (joining || Session.p2p == null || screen != Screen.FIND) return;
+    private void join(Target target) {
+        if (joining || screen != Screen.FIND) return;
+        if (target.kind == Target.DIRECT && Session.p2p == null) {
+            toast("This phone can't join a high-speed (Wi-Fi Direct) sender.");
+            return;
+        }
         joining = true;
-        joiningName = displayName;
-        findStatus.setText("Connecting to " + displayName + "…");
+        joiningName = target.displayName();
+        findStatus.setText("Connecting to " + joiningName + "…");
         findList.setAlpha(0.5f);
-        Session.p2p.connect(networkName);
+
+        if (target.kind == Target.DIRECT) {
+            Session.p2p.connect(target.ssid);
+            return;
+        }
+        // Joining a hotspot uses normal Wi-Fi, so stop the Wi-Fi Direct search competing for the radio.
+        if (Session.p2p != null) {
+            Session.p2p.stop();
+            Session.p2p = null;
+        }
+        WifiJoin link = new WifiJoin(this);
+        Session.join = link;
+        link.join(target.ssid, target.password, new WifiJoin.Listener() {
+            @Override
+            public void onConnected(String hostAddress) {
+                if (screen == Screen.FIND && Session.join == link) connectedTo(hostAddress);
+            }
+
+            @Override
+            public void onFailed(String message) {
+                if (screen != Screen.FIND || Session.join != link) return;
+                toast(message);
+                startFind();
+            }
+
+            @Override
+            public void onLost() {
+                Session.peerLost = true;
+            }
+        });
     }
 
     private void connectedTo(String hostAddress) {
@@ -607,8 +667,13 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
         Session.peerName = joiningName;
         Session.peerLost = false;
         Session.saveDir = receiveDir();
+        if (Session.beacon != null) {
+            Session.beacon.stop();
+            Session.beacon = null;
+        }
         // From here on the link reports to the session, not to this screen.
-        Session.p2p.setEvents(Session.peerEvents());
+        if (Session.p2p != null) Session.p2p.setEvents(Session.peerEvents());
+        if (Session.join != null) Session.join.setListener(Session.joinEvents());
         runInBackground();
         showPeerScreen();
     }
@@ -619,6 +684,7 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
         if (scanner != null || screen != Screen.FIND || joining) return;
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             afterPermission = this::openScanner;
+            requiredPermission = Manifest.permission.CAMERA;
             requestPermissions(new String[]{Manifest.permission.CAMERA}, REQ_PERMISSIONS);
             return;
         }
@@ -640,10 +706,10 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
 
     @Override
     public boolean onScanned(String text) {
-        String networkName = Qr.networkFrom(text);
-        if (networkName == null) return false;
+        Target target = Target.fromLink(text);
+        if (target == null) return false;
         closeScanner();
-        join(networkName, networkName.substring(P2p.PREFIX.length()));
+        join(target);
         return true;
     }
 
@@ -911,25 +977,39 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
     // ---------------------------------------------------------------- Permissions and radios
 
     private boolean phoneLinkSupported() {
-        if (P2p.supported(this)) return true;
+        if (Build.VERSION.SDK_INT >= 29) return true;
         new AlertDialog.Builder(this)
                 .setTitle("Not available on this phone")
-                .setMessage("Phone to phone sharing needs Android 10 or newer with Wi-Fi Direct. You can still use Share to desktop.")
+                .setMessage("Phone to phone sharing needs Android 10 or newer. You can still use Share to desktop.")
                 .setPositiveButton("OK", null)
                 .show();
         return false;
     }
 
-    /** Wi-Fi Direct needs the nearby-devices permission (Android 13+) or location (older). */
+    /**
+     * Hotspot and Wi-Fi Direct need the nearby-devices permission (Android 13+) or location (older).
+     * The Bluetooth permissions are asked at the same time but are optional: without them the
+     * phones just don't see each other in the list and connect by QR code instead.
+     */
     private void withNearbyPermission(Runnable then) {
-        String permission = Build.VERSION.SDK_INT >= 33
+        String wifiPermission = Build.VERSION.SDK_INT >= 33
                 ? Manifest.permission.NEARBY_WIFI_DEVICES
                 : Manifest.permission.ACCESS_FINE_LOCATION;
+        List<String> wanted = new ArrayList<>();
+        if (checkSelfPermission(wifiPermission) != PackageManager.PERMISSION_GRANTED) wanted.add(wifiPermission);
+        if (Build.VERSION.SDK_INT >= 31) {
+            for (String permission : new String[]{
+                    Manifest.permission.BLUETOOTH_ADVERTISE,
+                    Manifest.permission.BLUETOOTH_SCAN,
+                    Manifest.permission.BLUETOOTH_CONNECT}) {
+                if (checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED) wanted.add(permission);
+            }
+        }
         Runnable next = () -> {
             if (Build.VERSION.SDK_INT < 33 && !locationEnabled()) {
                 new AlertDialog.Builder(this)
                         .setTitle("Turn on Location")
-                        .setMessage("Android only lets apps find nearby Wi-Fi devices while Location is switched on. Turn it on, then try again.")
+                        .setMessage("Android only lets apps start a hotspot or find nearby devices while Location is switched on. Turn it on, then try again.")
                         .setPositiveButton("Open settings", (dialog, which) ->
                                 startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)))
                         .setNegativeButton("Cancel", null)
@@ -938,11 +1018,29 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
             }
             then.run();
         };
-        if (checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) {
+        if (wanted.isEmpty()) {
             next.run();
         } else {
             afterPermission = next;
-            requestPermissions(new String[]{permission}, REQ_PERMISSIONS);
+            requiredPermission = wifiPermission;
+            requestPermissions(wanted.toArray(new String[0]), REQ_PERMISSIONS);
+        }
+    }
+
+    /** Asks to switch Bluetooth on for "find nearby". Carries on either way; the QR code needs no Bluetooth. */
+    private void withBluetoothOn(Runnable then) {
+        boolean mayAsk = Build.VERSION.SDK_INT < 31
+                || checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
+        if (!mayAsk || !Beacon.bluetoothPresent(this) || Beacon.bluetoothOn(this)) {
+            then.run();
+            return;
+        }
+        afterBluetooth = then;
+        try {
+            startActivityForResult(new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE), REQ_BLUETOOTH);
+        } catch (RuntimeException error) {
+            afterBluetooth = null;
+            then.run();
         }
     }
 
@@ -989,12 +1087,13 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
         }
         if (requestCode != REQ_PERMISSIONS) return;
         Runnable next = afterPermission;
+        String required = requiredPermission;
         afterPermission = null;
-        boolean granted = results.length > 0;
-        for (int result : results) granted &= result == PackageManager.PERMISSION_GRANTED;
-        if (granted && next != null) {
+        requiredPermission = null;
+        if (next == null) return;
+        if (required == null || checkSelfPermission(required) == PackageManager.PERMISSION_GRANTED) {
             next.run();
-        } else if (!granted) {
+        } else {
             toast("That permission is needed for this step.");
         }
     }
@@ -1002,6 +1101,15 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_BLUETOOTH) {
+            Runnable next = afterBluetooth;
+            afterBluetooth = null;
+            if (next == null) return;
+            if (!Beacon.bluetoothOn(this)) toast("Bluetooth is off. Connect with the QR code instead.");
+            // Give the Bluetooth radio a moment to finish starting.
+            handler.postDelayed(next, 600);
+            return;
+        }
         if (requestCode != REQ_WIFI_PANEL) return;
         Runnable next = afterWifi;
         afterWifi = null;

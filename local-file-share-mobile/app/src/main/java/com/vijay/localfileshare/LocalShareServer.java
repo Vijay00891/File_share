@@ -39,6 +39,19 @@ public class LocalShareServer {
     // and files other devices uploaded (saved into sharedDir).
     private final Map<String, Entry> entries = new LinkedHashMap<>();
 
+    // When each other device last talked to this server, to tell whether anyone is connected.
+    private final Map<String, Long> lastSeen = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** How many other devices made a request within the last windowMillis. */
+    public int activeClients(long windowMillis) {
+        long cutoff = System.currentTimeMillis() - windowMillis;
+        int count = 0;
+        for (Long seen : lastSeen.values()) {
+            if (seen >= cutoff) count++;
+        }
+        return count;
+    }
+
     public static class Entry {
         public final String name;
         public final File file;
@@ -145,6 +158,8 @@ public class LocalShareServer {
              BufferedOutputStream output = new BufferedOutputStream(closeable.getOutputStream())) {
             Request request = readRequest(input);
             if (request == null) return;
+            java.net.InetAddress remote = closeable.getInetAddress();
+            if (remote != null && !remote.isLoopbackAddress()) lastSeen.put(remote.getHostAddress(), System.currentTimeMillis());
 
             if ("GET".equals(request.method)) {
                 if ("/".equals(request.path) || "/index.html".equals(request.path)) {

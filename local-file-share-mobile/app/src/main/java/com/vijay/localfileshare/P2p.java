@@ -18,8 +18,6 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -37,7 +35,7 @@ import java.util.Set;
 @TargetApi(29)
 @SuppressLint("MissingPermission")
 class P2p {
-    static final String PREFIX = "DIRECT-LS-";
+    static final String PREFIX = Target.DIRECT_PREFIX;
     private static final String SERVICE_TYPE = "_localshare._tcp";
 
     /** Callbacks arrive on the main thread. */
@@ -104,7 +102,7 @@ class P2p {
 
     void startHost(String deviceName, boolean fiveGhz, Events listener) {
         if (!begin(Mode.HOST, listener)) return;
-        hostName = cleanName(deviceName);
+        hostName = Target.cleanName(deviceName);
         networkName = PREFIX + hostName;
         wantFiveGhz = fiveGhz;
         hostReady = false;
@@ -119,7 +117,7 @@ class P2p {
         if (mode != Mode.HOST) return;
         WifiP2pConfig config = new WifiP2pConfig.Builder()
                 .setNetworkName(networkName)
-                .setPassphrase(passwordFor(networkName))
+                .setPassphrase(Target.directPassword(networkName))
                 .setGroupOperatingBand(wantFiveGhz
                         ? WifiP2pConfig.GROUP_OWNER_BAND_5GHZ
                         : WifiP2pConfig.GROUP_OWNER_BAND_2GHZ)
@@ -258,7 +256,7 @@ class P2p {
         manager.clearServiceRequests(channel, after(null));
         WifiP2pConfig config = new WifiP2pConfig.Builder()
                 .setNetworkName(ssid)
-                .setPassphrase(passwordFor(ssid))
+                .setPassphrase(Target.directPassword(ssid))
                 .build();
         handler.postDelayed(this::joinPoll, 1500);
         manager.connect(channel, config, new WifiP2pManager.ActionListener() {
@@ -392,21 +390,4 @@ class P2p {
         return "Could not start the direct Wi-Fi link. Check that Wi-Fi is on.";
     }
 
-    private static String cleanName(String name) {
-        String cleaned = (name == null ? "" : name).replaceAll("[^A-Za-z0-9 _-]", "").trim();
-        if (cleaned.length() > 18) cleaned = cleaned.substring(0, 18).trim();
-        return cleaned.isEmpty() ? "Phone" : cleaned;
-    }
-
-    static String passwordFor(String ssid) {
-        try {
-            byte[] hash = MessageDigest.getInstance("SHA-256")
-                    .digest(("localshare:" + ssid).getBytes(StandardCharsets.UTF_8));
-            StringBuilder builder = new StringBuilder();
-            for (int i = 0; i < 6; i++) builder.append(String.format("%02x", hash[i]));
-            return builder.toString();
-        } catch (Exception error) {
-            return "localshare";
-        }
-    }
 }

@@ -12,38 +12,12 @@ import com.google.zxing.common.HybridBinarizer;
 import com.google.zxing.qrcode.QRCodeReader;
 import com.google.zxing.qrcode.QRCodeWriter;
 
-import java.net.URLDecoder;
-import java.net.URLEncoder;
 import java.util.EnumMap;
 import java.util.Map;
 
-/** QR codes: the sender shows its link name, the receiver scans it to connect without searching. */
+/** QR code drawing and reading. What the codes say is defined by {@link Target}. */
 final class Qr {
-    private static final String JOIN_PREFIX = "localshare://join?ssid=";
-
     private Qr() {
-    }
-
-    static String joinLink(String networkName) {
-        try {
-            return JOIN_PREFIX + URLEncoder.encode(networkName, "UTF-8");
-        } catch (Exception error) {
-            return JOIN_PREFIX + networkName;
-        }
-    }
-
-    /** Returns the sender's network name from a scanned code, or null if it isn't one of ours. */
-    static String networkFrom(String scanned) {
-        if (scanned == null) return null;
-        String value = scanned.trim();
-        if (value.startsWith(JOIN_PREFIX)) {
-            try {
-                value = URLDecoder.decode(value.substring(JOIN_PREFIX.length()), "UTF-8");
-            } catch (Exception error) {
-                return null;
-            }
-        }
-        return value.startsWith(P2p.PREFIX) && value.length() > P2p.PREFIX.length() ? value : null;
     }
 
     static Bitmap encode(String text, int sizePx) {
