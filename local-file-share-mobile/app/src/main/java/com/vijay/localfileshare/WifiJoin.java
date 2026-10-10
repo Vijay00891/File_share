@@ -78,16 +78,16 @@ class WifiJoin {
     void join(String ssid, String password, Listener events) {
         listener = events;
         try {
-            WifiNetworkSpecifier specifier = new WifiNetworkSpecifier.Builder()
-                    .setSsid(ssid)
-                    .setWpa2Passphrase(password)
-                    .build();
+            WifiNetworkSpecifier.Builder wanted = new WifiNetworkSpecifier.Builder().setSsid(ssid);
+            if (password != null && !password.isEmpty()) wanted.setWpa2Passphrase(password);
+            WifiNetworkSpecifier specifier = wanted.build();
             NetworkRequest request = new NetworkRequest.Builder()
                     .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
                     .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
                     .setNetworkSpecifier(specifier)
                     .build();
-            connectivity.requestNetwork(request, callback, 45000);
+            // The wait includes the time the person takes to answer Android's "Connect?" prompt.
+            connectivity.requestNetwork(request, callback, 90000);
         } catch (RuntimeException error) {
             events.onFailed("Couldn't start connecting. Check that Wi-Fi is on.");
         }

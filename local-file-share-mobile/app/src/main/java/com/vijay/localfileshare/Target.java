@@ -15,7 +15,7 @@ import java.util.Arrays;
  * This class is plain Java so the encoding can be unit tested off the phone.
  */
 final class Target {
-    /** The sender runs a hotspot; name and password are picked by Android. */
+    /** The sender runs a hotspot; its name is picked by Android and it may have no password. */
     static final int HOTSPOT = 0;
     /** The sender runs a Wi-Fi Direct group named DIRECT-LS-&lt;name&gt;; the password follows from the name. */
     static final int DIRECT = 1;
@@ -40,12 +40,17 @@ final class Target {
     Target(int kind, String ssid, String password, String name) {
         this.kind = kind;
         this.ssid = ssid;
-        this.password = kind == DIRECT ? directPassword(ssid) : password;
+        this.password = kind == DIRECT ? directPassword(ssid) : (password == null ? "" : password);
         this.name = name == null ? "" : name;
     }
 
     static Target direct(String ssid) {
         return new Target(DIRECT, ssid, null, "");
+    }
+
+    /** True when the link has no password. */
+    boolean open() {
+        return password.isEmpty();
     }
 
     /** What to show in the list of nearby senders. */
@@ -62,7 +67,8 @@ final class Target {
     private boolean valid() {
         if (ssid == null || ssid.isEmpty() || utf8(ssid).length > 32) return false;
         if (kind == DIRECT) return ssid.startsWith(DIRECT_PREFIX) && ssid.length() > DIRECT_PREFIX.length();
-        return kind == HOTSPOT && password != null && password.length() >= 8 && password.length() <= 63;
+        // A hotspot started on a chosen band (Android 16+) has no password at all.
+        return kind == HOTSPOT && (password.isEmpty() || (password.length() >= 8 && password.length() <= 63));
     }
 
     // ---- QR link ----
@@ -71,7 +77,7 @@ final class Target {
         StringBuilder link = new StringBuilder(LINK);
         link.append("k=").append(kind == DIRECT ? "d" : "h");
         link.append("&ssid=").append(encode(ssid));
-        if (kind == HOTSPOT) link.append("&pass=").append(encode(password));
+        if (kind == HOTSPOT && !password.isEmpty()) link.append("&pass=").append(encode(password));
         if (!name.isEmpty()) link.append("&name=").append(encode(name));
         return link.toString();
     }

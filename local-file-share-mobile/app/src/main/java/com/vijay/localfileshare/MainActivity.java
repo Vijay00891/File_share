@@ -60,6 +60,7 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
     private static final int REQ_STORAGE = 53;
     private static final int REQ_NOTIFICATIONS = 54;
     private static final int REQ_BLUETOOTH = 55;
+    private static final int REQ_LOCATION = 56;
 
     private enum Screen { HOME, PHONE, HOST, FIND, PEER }
 
@@ -77,6 +78,7 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
     private Runnable afterPermission;
     private Runnable afterWifi;
     private Runnable afterBluetooth;
+    private Runnable afterLocation;
     /** The one permission the pending step cannot work without; others asked alongside are optional. */
     private String requiredPermission;
 
@@ -278,7 +280,8 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
 
     private void showSendDialog() {
         if (!phoneLinkSupported()) return;
-        boolean canHighSpeed = P2p.supported(this) && wifiManager().is5GHzBandSupported();
+        boolean canHighSpeed = wifiManager().is5GHzBandSupported()
+                && (!Session.highSpeedNeedsWifi() || P2p.supported(this));
 
         LinearLayout box = Ui.column(this);
         box.setPadding(dp(24), dp(12), dp(24), 0);
@@ -286,23 +289,30 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
                 "This phone turns on a hotspot for the other phone to join. On the other phone, open Local Share and tap Share to phone, then Receive.",
                 15, Ui.MUTED, false));
         CheckBox highSpeed = new CheckBox(this);
-        highSpeed.setText("High-speed transfer (5 GHz)");
+        highSpeed.setText("Turn on 5 GHz for high speed");
         highSpeed.setTextSize(16);
         highSpeed.setTextColor(Ui.INK);
         highSpeed.setButtonTintList(ColorStateList.valueOf(Ui.PRIMARY));
         highSpeed.setEnabled(canHighSpeed);
         box.addView(Ui.margin(this, highSpeed, -6, 16, 0, 0));
-        box.addView(Ui.margin(this, Ui.text(this, canHighSpeed
-                ? "Uses Wi-Fi Direct on the faster 5 GHz band instead of the hotspot. Needs Wi-Fi switched on, and both phones must support 5 GHz."
-                : "This phone doesn't support 5 GHz Wi-Fi Direct.", 13, Ui.MUTED, false), 26, 0, 0, 0));
+        String note;
+        if (!canHighSpeed) {
+            note = "This phone doesn't support 5 GHz, so the hotspot uses 2.4 GHz.";
+        } else if (Session.highSpeedNeedsWifi()) {
+            note = "Faster, with a shorter range. Left off, the hotspot uses 2.4 GHz. On this Android version 5 GHz needs Wi-Fi switched on, and both phones must support 5 GHz.";
+        } else {
+            note = "Puts the hotspot on the faster 5 GHz band, with a shorter range. Left off, the hotspot uses 2.4 GHz. The other phone must support 5 GHz.";
+        }
+        box.addView(Ui.margin(this, Ui.text(this, note, 13, Ui.MUTED, false), 26, 0, 0, 0));
 
         new AlertDialog.Builder(this)
                 .setTitle("Send to a phone")
                 .setView(box)
                 .setPositiveButton("Start", (dialog, which) -> withNearbyPermission(() -> withBluetoothOn(() -> {
-                    // The hotspot works with Wi-Fi off; only Wi-Fi Direct needs it on.
-                    if (highSpeed.isChecked()) withWifiOn(() -> startHost(true, true));
-                    else startHost(true, false);
+                    // The hotspot works with Wi-Fi off; only 5 GHz on older Android needs it on.
+                    boolean fiveGhz = highSpeed.isChecked();
+                    if (fiveGhz && Session.highSpeedNeedsWifi()) withWifiOn(() -> startHost(true, true));
+                    else startHost(true, fiveGhz);
                 })))
                 .setNegativeButton("Cancel", null)
                 .show();
@@ -612,7 +622,7 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
         LinearLayout texts = Ui.column(this);
         texts.setPadding(dp(14), 0, 0, 0);
         texts.addView(Ui.oneLine(Ui.text(this, displayName, 17, Ui.INK, true)));
-        texts.addView(Ui.text(this, target.kind == Target.DIRECT ? "High speed  ·  tap to connect" : "Tap to connect", 14, Ui.MUTED, false));
+        texts.addView(Ui.text(this, "Tap to connect", 14, Ui.MUTED, false));
         row.addView(texts, Ui.weighted());
 
         row.setOnClickListener(v -> join(target));
@@ -1005,23 +1015,24 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
                 if (checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED) wanted.add(permission);
             }
         }
-        Runnable next = () -> {
+        Runnable[] next = new Runnable[1];
+        next[0] = () -> {
             if (Build.VERSION.SDK_INT < 33 && !locationEnabled()) {
-                new AlertDialog.Builder(this)
-                        .setTitle("Turn on Location")
-                        .setMessage("Android only lets apps start a hotspot or find nearby devices while Location is switched on. Turn it on, then try again.")
-                        .setPositiveButton("Open settings", (dialog, which) ->
-                                startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)))
-                        .setNegativeButton("Cancel", null)
-                        .show();
+                askToChangeSetting("Turn on Location",
+                        "Android only lets apps start a hotspot or find nearby phones while Location is switched on. "
+                                + "Local Share does not record where you are.\n\nTurn on Location, then come back.",
+                        "Open settings", () -> {
+                            afterLocation = next[0];
+                            startActivityForResult(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS), REQ_LOCATION);
+                        });
                 return;
             }
             then.run();
         };
         if (wanted.isEmpty()) {
-            next.run();
+            next[0].run();
         } else {
-            afterPermission = next;
+            afterPermission = next[0];
             requiredPermission = wifiPermission;
             requestPermissions(wanted.toArray(new String[0]), REQ_PERMISSIONS);
         }
@@ -1035,13 +1046,22 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
             then.run();
             return;
         }
-        afterBluetooth = then;
-        try {
-            startActivityForResult(new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE), REQ_BLUETOOTH);
-        } catch (RuntimeException error) {
-            afterBluetooth = null;
-            then.run();
-        }
+        new AlertDialog.Builder(this)
+                .setTitle("Turn on Bluetooth")
+                .setMessage("Bluetooth lets the two phones find each other, so the sender shows up by name in the "
+                        + "receiver's list. Files still travel over Wi-Fi.\n\nWithout Bluetooth you can connect by scanning the QR code.")
+                .setPositiveButton("Turn on Bluetooth", (dialog, which) -> {
+                    afterBluetooth = then;
+                    try {
+                        startActivityForResult(new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE), REQ_BLUETOOTH);
+                    } catch (RuntimeException error) {
+                        afterBluetooth = null;
+                        then.run();
+                    }
+                })
+                .setNegativeButton("Use QR code", (dialog, which) -> then.run())
+                .setOnCancelListener(dialog -> then.run())
+                .show();
     }
 
     private boolean locationEnabled() {
@@ -1051,21 +1071,42 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
         return Settings.Secure.getInt(getContentResolver(), Settings.Secure.LOCATION_MODE, 0) != 0;
     }
 
-    /** Android 10+ no longer lets apps switch Wi-Fi on silently, so show the system Wi-Fi panel. */
+    /**
+     * Android 10+ does not let an app switch Wi-Fi on by itself, so ask the person to do it and
+     * open the system Wi-Fi panel. Continues on its own once Wi-Fi is on.
+     */
     @SuppressWarnings("deprecation")
     private void withWifiOn(Runnable then) {
         WifiManager wifi = wifiManager();
         if (wifi.isWifiEnabled()) {
             then.run();
         } else if (Build.VERSION.SDK_INT >= 29) {
-            afterWifi = then;
-            toast("Turn on Wi-Fi to continue");
-            startActivityForResult(new Intent(Settings.Panel.ACTION_WIFI), REQ_WIFI_PANEL);
+            askToChangeSetting("Turn on Wi-Fi",
+                    "Local Share needs Wi-Fi switched on to connect the two phones. Android doesn't allow apps to "
+                            + "turn it on for you.\n\nTurn on Wi-Fi in the panel that opens. You don't need to join a network.",
+                    "Turn on Wi-Fi", () -> {
+                        afterWifi = then;
+                        try {
+                            startActivityForResult(new Intent(Settings.Panel.ACTION_WIFI), REQ_WIFI_PANEL);
+                        } catch (RuntimeException noPanel) {
+                            startActivityForResult(new Intent(Settings.ACTION_WIFI_SETTINGS), REQ_WIFI_PANEL);
+                        }
+                    });
         } else {
             wifi.setWifiEnabled(true);
             toast("Turning on Wi-Fi…");
             handler.postDelayed(then, 2500);
         }
+    }
+
+    /** Explains a setting only the person can change, then opens it. */
+    private void askToChangeSetting(String title, String message, String action, Runnable open) {
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(message)
+                .setPositiveButton(action, (dialog, which) -> open.run())
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     /** Starts the foreground service that keeps the share alive once the app is left. */
@@ -1110,15 +1151,22 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
             handler.postDelayed(next, 600);
             return;
         }
+        if (requestCode == REQ_LOCATION) {
+            Runnable next = afterLocation;
+            afterLocation = null;
+            // Runs the same check again: continues if Location is on, asks again if not.
+            if (next != null) next.run();
+            return;
+        }
         if (requestCode != REQ_WIFI_PANEL) return;
         Runnable next = afterWifi;
         afterWifi = null;
         if (next == null) return;
-        if (wifiManager().isWifiEnabled()) {
-            handler.postDelayed(next, 800);
-        } else {
-            toast("Wi-Fi is still off.");
-        }
+        // Wi-Fi takes a moment to report itself on after the panel closes.
+        handler.postDelayed(() -> {
+            if (wifiManager().isWifiEnabled()) next.run();
+            else withWifiOn(next);
+        }, 1000);
     }
 
     // ---------------------------------------------------------------- Shared pieces

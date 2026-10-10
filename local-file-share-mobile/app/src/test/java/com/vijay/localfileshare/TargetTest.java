@@ -1,5 +1,6 @@
 package com.vijay.localfileshare;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
@@ -147,6 +148,38 @@ public class TargetTest {
         }
     }
 
+    @Test
+    public void openHotspotSurvivesBeaconAndQrLink() {
+        // Android 16's 5 GHz hotspot has no password.
+        Target sent = new Target(Target.HOTSPOT, "AndroidShare_7310", "", "Pixel 9");
+        assertTrue(sent.open());
+
+        Target heard = viaBeacon(sent);
+        assertNotNull(heard);
+        assertEquals("AndroidShare_7310", heard.ssid);
+        assertTrue(heard.open());
+        assertEquals("Pixel 9", heard.name);
+
+        assertFalse(sent.toLink().contains("pass="));
+        Target scanned = Target.fromLink(sent.toLink());
+        assertNotNull(scanned);
+        assertEquals(Target.HOTSPOT, scanned.kind);
+        assertTrue(scanned.open());
+        assertEquals("Pixel 9", scanned.displayName());
+
+        Target nullPassword = new Target(Target.HOTSPOT, "AndroidShare_7310", null, "Pixel 9");
+        assertTrue(nullPassword.open());
+        assertNotNull(nullPassword.toBeacon());
+    }
+
+    @Test
+    public void protectedHotspotIsNotMistakenForOpen() {
+        Target read = viaBeacon(new Target(Target.HOTSPOT, HOTSPOT_NAME, HOTSPOT_PASSWORD, "A"));
+        assertNotNull(read);
+        assertFalse(read.open());
+        assertFalse(Target.direct("DIRECT-LS-Pixel").open());
+    }
+
     // ---- QR link ----
 
     @Test
@@ -188,7 +221,6 @@ public class TargetTest {
         assertNull(Target.fromLink("https://example.com/?ssid=DIRECT-LS-x"));
         assertNull(Target.fromLink("WIFI:S:Home;T:WPA;P:secret123;;"));
         assertNull(Target.fromLink("localshare://join?"));
-        assertNull(Target.fromLink("localshare://join?k=h&ssid=AndroidShare_1"));
         assertNull(Target.fromLink("localshare://join?k=h&ssid=AndroidShare_1&pass=short"));
         assertNull(Target.fromLink("localshare://join?k=d&ssid=NotOurs"));
         assertNull(Target.fromLink("localshare://join?k=h&ssid=%ZZ&pass=12345678"));
@@ -221,6 +253,13 @@ public class TargetTest {
         assertEquals("AndroidShare_1", Hotspot.unquote("\"AndroidShare_1\""));
         assertEquals("plain", Hotspot.unquote("plain"));
         assertNull(Hotspot.unquote(null));
+        // What a started hotspot reports is only used when a phone could actually join with it.
+        assertArrayEquals(new String[]{"AndroidShare_1", "abcdefgh"}, Hotspot.usable("AndroidShare_1", "abcdefgh", false));
+        assertArrayEquals(new String[]{"AndroidShare_1", ""}, Hotspot.usable("AndroidShare_1", null, true));
+        assertNull("a protected hotspot without a password cannot be joined", Hotspot.usable("AndroidShare_1", null, false));
+        assertNull(Hotspot.usable("AndroidShare_1", "short", false));
+        assertNull(Hotspot.usable("", "abcdefgh", false));
+        assertNull(Hotspot.usable(null, "abcdefgh", false));
         assertEquals("192.168.43.1", WifiJoin.gatewayGuess("192.168.43.57"));
         assertNull(WifiJoin.gatewayGuess("not-an-address"));
     }

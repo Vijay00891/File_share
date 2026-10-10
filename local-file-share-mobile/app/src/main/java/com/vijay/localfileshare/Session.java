@@ -88,15 +88,16 @@ final class Session {
     // ---------------------------------------------------------------- Sending to a phone
 
     /**
-     * Brings up the sender's link. Normally that is the phone's hotspot, which needs no Wi-Fi;
-     * high speed uses Wi-Fi Direct instead because only that lets an app ask for 5 GHz.
+     * Brings up the sender's link: a hotspot, which needs no Wi-Fi on this phone.
+     * High speed puts it on 5 GHz. Android 16+ can do that on the hotspot itself; older versions
+     * cannot choose the hotspot's band, so there 5 GHz runs over Wi-Fi Direct instead.
      */
     static void startSend(Context context, String deviceName, boolean highSpeed) {
         Context app = context.getApplicationContext();
         String name = Target.cleanName(deviceName);
         hostTitle = "Starting…";
         hostDetail = "";
-        if (highSpeed) {
+        if (highSpeed && highSpeedNeedsWifi()) {
             P2p link = new P2p(app);
             p2p = link;
             link.startHost(name, true, directEvents(app));
@@ -104,12 +105,16 @@ final class Session {
         }
         Hotspot started = new Hotspot();
         hotspot = started;
-        started.start(app, new Hotspot.Listener() {
+        started.start(app, highSpeed, new Hotspot.Listener() {
             @Override
-            public void onStarted(String ssid, String password) {
+            public void onStarted(String ssid, String password, boolean fiveGhz) {
                 if (hotspot != started) return;
                 boolean nearby = announce(app, new Target(Target.HOTSPOT, ssid, password, name));
-                hotspotInfo = "Visible as " + name + "\nHotspot: " + ssid + "\nPassword: " + password
+                String band = fiveGhz ? "5 GHz hotspot"
+                        : highSpeed ? "hotspot (5 GHz wasn't available)" : "2.4 GHz hotspot";
+                hotspotInfo = "Visible as " + name + "  ·  " + band
+                        + "\nWi-Fi name: " + ssid
+                        + "\n" + (password.isEmpty() ? "No password (open link)" : "Password: " + password)
                         + (nearby ? "" : "\n\nBluetooth is off or unavailable, so this phone won't appear in the "
                         + "other phone's list. Use the QR code instead.");
                 pollHost();
@@ -127,10 +132,19 @@ final class Session {
                 if (hotspot != started) return;
                 hotspotInfo = null;
                 hostQr = null;
+                if (beacon != null) {
+                    beacon.stop();
+                    beacon = null;
+                }
                 hostTitle = "The hotspot was turned off";
                 hostDetail = "Stop sending and start again to share more files.";
             }
         });
+    }
+
+    /** Whether 5 GHz on this Android version has to go over Wi-Fi Direct, which needs Wi-Fi on. */
+    static boolean highSpeedNeedsWifi() {
+        return !Hotspot.canChooseBand();
     }
 
     /** Publishes how to join: the QR link, and the Bluetooth beacon when Bluetooth allows it. */
