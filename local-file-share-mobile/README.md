@@ -7,6 +7,7 @@ Native Android app for sharing files without the internet.
 - **Share to desktop** – starts a small web server on the phone. Open the shown address in a computer's browser (same Wi-Fi) to upload and download files.
 - **Share to phone → Send** – turns on a hotspot on the sender (Wi-Fi does not need to be on) and announces it over Bluetooth so only phones running this app can see it. *Turn on 5 GHz for high speed* puts the link on 5 GHz: on Android 16+ that is the hotspot itself; on Android 10–15, where apps cannot choose a hotspot's band, it runs over Wi-Fi Direct and needs Wi-Fi on.
 - **Share to phone → Receive** – lists nearby senders, joins the one you tap (Android shows one confirmation for a hotspot), then lets you save the sender's files and send files back.
+- **Share from other apps** – Local Share appears in the Android share sheet. Files shared from the gallery, a file manager or any other app are queued and sent as soon as you pick a destination, or straight away if a share is already running.
 - **QR code** – the sender screen shows a QR code; the receiver can tap *Scan QR code* to connect without searching. The desktop screen shows a QR code of its address too.
 - **Runs in the background** – once a share is running it keeps going after you leave the app, with an ongoing notification that has a *Stop sharing* button. Reopening the app returns to the live share.
 - **Light and dark** – the app and the web page follow the device's theme.

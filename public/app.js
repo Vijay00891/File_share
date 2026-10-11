@@ -172,11 +172,14 @@ function upload(file) {
   const xhr = new XMLHttpRequest();
   xhr.open("POST", "/api/upload");
   xhr.setRequestHeader("x-file-name", encodeURIComponent(file.name));
+  const started = performance.now();
   xhr.upload.addEventListener("progress", (event) => {
     if (!event.lengthComputable) return;
     const pct = Math.round((event.loaded / event.total) * 100);
+    const seconds = (performance.now() - started) / 1000;
+    const speed = seconds > 0.5 ? `${formatBytes(event.loaded / seconds)}/s · ` : "";
     item.fill.style.width = `${pct}%`;
-    item.info.textContent = `${pct}% · ${formatBytes(event.loaded)} / ${formatBytes(event.total)}`;
+    item.info.textContent = `${speed}${pct}% · ${formatBytes(event.loaded)} / ${formatBytes(event.total)}`;
   });
   const finish = (ok) => {
     item.row.classList.add(ok ? "done" : "failed");

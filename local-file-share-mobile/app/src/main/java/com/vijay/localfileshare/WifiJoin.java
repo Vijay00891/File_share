@@ -9,6 +9,8 @@ import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.NetworkRequest;
 import android.net.RouteInfo;
+import android.net.wifi.WifiInfo;
+import android.net.wifi.WifiManager;
 import android.net.wifi.WifiNetworkSpecifier;
 import android.os.Build;
 import android.os.Handler;
@@ -32,6 +34,8 @@ class WifiJoin {
     }
 
     private final ConnectivityManager connectivity;
+    private final WifiManager wifi;
+    private volatile Network joined;
     private final Handler main = new Handler(Looper.getMainLooper());
     private volatile Listener listener;
     private boolean reported;
@@ -40,6 +44,7 @@ class WifiJoin {
     private final ConnectivityManager.NetworkCallback callback = new ConnectivityManager.NetworkCallback() {
         @Override
         public void onAvailable(Network network) {
+            joined = network;
             connectivity.bindProcessToNetwork(network);
             LinkProperties properties = connectivity.getLinkProperties(network);
             main.post(() -> resolve(properties));
@@ -69,6 +74,7 @@ class WifiJoin {
 
     WifiJoin(Context context) {
         connectivity = (ConnectivityManager) context.getApplicationContext().getSystemService(Context.CONNECTIVITY_SERVICE);
+        wifi = (WifiManager) context.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
     }
 
     void setListener(Listener next) {
@@ -90,6 +96,27 @@ class WifiJoin {
             connectivity.requestNetwork(request, callback, 90000);
         } catch (RuntimeException error) {
             events.onFailed("Couldn't start connecting. Check that Wi-Fi is on.");
+        }
+    }
+
+    /** The band and negotiated speed of the Wi-Fi link to the sender, or null when unknown. */
+    @SuppressWarnings("deprecation")
+    String describeLink() {
+        try {
+            WifiInfo info = null;
+            Network network = joined;
+            if (Build.VERSION.SDK_INT >= 31 && network != null) {
+                NetworkCapabilities capabilities = connectivity.getNetworkCapabilities(network);
+                if (capabilities != null && capabilities.getTransportInfo() instanceof WifiInfo) {
+                    info = (WifiInfo) capabilities.getTransportInfo();
+                }
+            }
+            if (info == null && wifi != null) info = wifi.getConnectionInfo();
+            if (info == null || info.getFrequency() <= 0) return null;
+            int standard = Build.VERSION.SDK_INT >= 30 ? info.getWifiStandard() : 0;
+            return Link.describe(info.getFrequency(), info.getLinkSpeed(), standard);
+        } catch (RuntimeException error) {
+            return null;
         }
     }
 

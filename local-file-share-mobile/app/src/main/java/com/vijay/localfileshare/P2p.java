@@ -81,6 +81,8 @@ class P2p {
 
     private String joining;
     private boolean connected;
+    /** Band of the group this phone joined, for the receiver screen. */
+    volatile String linkInfo;
 
     static boolean supported(Context context) {
         return Build.VERSION.SDK_INT >= 29
@@ -299,6 +301,9 @@ class P2p {
             boolean up = info != null && info.groupFormed && !info.isGroupOwner && info.groupOwnerAddress != null;
             if (up && !connected) {
                 connected = true;
+                manager.requestGroupInfo(channel, group -> {
+                    if (group != null) linkInfo = Link.describe(group.getFrequency(), 0, 0);
+                });
                 events.onConnected(info.groupOwnerAddress.getHostAddress());
             } else if (!up && connected) {
                 connected = false;

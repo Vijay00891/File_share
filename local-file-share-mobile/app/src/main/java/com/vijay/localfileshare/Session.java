@@ -31,6 +31,8 @@ final class Session {
         volatile long done;
         volatile long total;
         volatile int state = WAITING;
+        /** Bytes per second: the current rate while running, the average once finished. */
+        volatile long speed;
         /** Where a finished download was saved. */
         volatile File file;
 
@@ -64,6 +66,14 @@ final class Session {
     static volatile boolean peerLost;
     static final List<Transfer> transfers = new CopyOnWriteArrayList<>();
     private static ExecutorService transferQueue;
+    // Large files already use several connections each, so two files at a time is plenty.
+    static final int PARALLEL_TRANSFERS = 2;
+
+    /**
+     * Files handed over from another app's Share button that have not been sent yet.
+     * Kept across starting and stopping a share, until they are sent or cleared.
+     */
+    static final List<PickerView.Item> pendingShare = new CopyOnWriteArrayList<>();
 
     private Session() {
     }
@@ -231,21 +241,50 @@ final class Session {
 
     /** Queues an upload or download; progress is read from the returned model by the screen. */
     static void addTransfer(String name, boolean upload, Job job) {
-        if (transferQueue == null) transferQueue = Executors.newSingleThreadExecutor();
+        // A few files at once fill the link better than one after another, especially small ones.
+        if (transferQueue == null) transferQueue = Executors.newFixedThreadPool(PARALLEL_TRANSFERS);
         Transfer transfer = new Transfer(name, upload);
         transfers.add(transfer);
         transferQueue.execute(() -> {
             transfer.state = Transfer.RUNNING;
+            long started = System.nanoTime();
+            long[] mark = {started, 0};
             try {
                 transfer.file = job.run((done, total) -> {
                     transfer.done = done;
                     transfer.total = total;
+                    long now = System.nanoTime();
+                    if (now - mark[0] >= 500_000_000L) {
+                        transfer.speed = rate(done - mark[1], now - mark[0]);
+                        mark[0] = now;
+                        mark[1] = done;
+                    }
                 });
+                transfer.speed = rate(transfer.done, System.nanoTime() - started);
                 transfer.state = Transfer.DONE;
             } catch (Exception error) {
                 transfer.state = Transfer.FAILED;
             }
         });
+    }
+
+    /** The receiver's real link to the sender: band and negotiated speed, when Android reports them. */
+    static String linkInfo() {
+        if (join != null) return join.describeLink();
+        return p2p != null ? p2p.linkInfo : null;
+    }
+
+    /** Combined speed of every transfer running right now, in bytes per second. */
+    static long totalSpeed() {
+        long total = 0;
+        for (Transfer transfer : transfers) {
+            if (transfer.state == Transfer.RUNNING) total += transfer.speed;
+        }
+        return total;
+    }
+
+    static long rate(long bytes, long nanos) {
+        return nanos <= 0 ? 0 : (long) (bytes * 1_000_000_000.0 / nanos);
     }
 
     static void stop(Context context) {

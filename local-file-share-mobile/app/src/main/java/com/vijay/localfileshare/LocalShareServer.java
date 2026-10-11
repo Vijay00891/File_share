@@ -9,6 +9,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.RandomAccessFile;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -28,6 +29,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class LocalShareServer {
+    /** Large chunks keep the number of disk and network calls low on big files. */
+    private static final int TRANSFER_BUFFER = 1024 * 1024;
     private final android.content.Context context;
     private final int port;
     private final File sharedDir;
@@ -177,7 +180,7 @@ public class LocalShareServer {
                 } else if ("/api/info".equals(request.path)) {
                     sendText(output, 200, "application/json; charset=utf-8", "{\"addresses\":[]}");
                 } else if (request.path.startsWith("/download/")) {
-                    download(output, request.path.substring("/download/".length()));
+                    download(output, request, request.path.substring("/download/".length()));
                 } else {
                     sendText(output, 404, "application/json; charset=utf-8", "{\"error\":\"Not found\"}");
                 }
@@ -258,7 +261,7 @@ public class LocalShareServer {
         File target = uniqueFile(sharedDir, fileName);
         // No size limit: the body is streamed straight to disk in 64 KB chunks.
         long remaining = contentLength;
-        byte[] buffer = new byte[64 * 1024];
+        byte[] buffer = new byte[TRANSFER_BUFFER];
         boolean complete = true;
 
         try (FileOutputStream fileOutput = new FileOutputStream(target)) {
@@ -289,20 +292,84 @@ public class LocalShareServer {
         sendText(output, 201, "application/json; charset=utf-8", "{\"ok\":true}");
     }
 
-    private void download(OutputStream output, String rawName) throws IOException {
+    /** Marks a Range header that asks for bytes the file does not have. */
+    static final long[] RANGE_INVALID = new long[0];
+
+    /**
+     * Reads "bytes=first-last", "bytes=first-" or "bytes=-lastN" into {first, last}.
+     * Null means "send the whole file" (no header, or a form this server does not split).
+     */
+    static long[] parseRange(String header, long size) {
+        if (header == null) return null;
+        String value = header.trim().toLowerCase(Locale.US);
+        if (!value.startsWith("bytes=") || value.contains(",")) return null;
+        String spec = value.substring("bytes=".length()).trim();
+        int dash = spec.indexOf('-');
+        if (dash < 0) return null;
+        try {
+            String first = spec.substring(0, dash).trim();
+            String last = spec.substring(dash + 1).trim();
+            long start;
+            long end;
+            if (first.isEmpty()) {
+                if (last.isEmpty()) return null;
+                long suffix = Long.parseLong(last);
+                if (suffix <= 0) return RANGE_INVALID;
+                start = Math.max(0, size - suffix);
+                end = size - 1;
+            } else {
+                start = Long.parseLong(first);
+                end = last.isEmpty() ? size - 1 : Math.min(Long.parseLong(last), size - 1);
+            }
+            if (start < 0 || start >= size || end < start) return RANGE_INVALID;
+            return new long[]{start, end};
+        } catch (NumberFormatException error) {
+            return null;
+        }
+    }
+
+    // Supports byte ranges so a receiver can pull one large file over several connections at once.
+    private void download(OutputStream output, Request request, String rawName) throws IOException {
         Entry entry = find(urlDecode(rawName));
         if (entry == null || !entry.file.isFile()) {
             sendText(output, 404, "application/json; charset=utf-8", "{\"error\":\"File not found\"}");
             return;
         }
 
-        String disposition = "attachment; filename*=UTF-8''" + urlEncode(entry.name);
-        writeHeaders(output, 200, "application/octet-stream", entry.file.length(), disposition);
-        try (FileInputStream fileInput = new FileInputStream(entry.file)) {
-            byte[] buffer = new byte[64 * 1024];
-            int read;
-            while ((read = fileInput.read(buffer)) != -1) {
+        long size = entry.file.length();
+        long[] range = parseRange(request.headers.get("range"), size);
+        if (range == RANGE_INVALID) {
+            output.write(("HTTP/1.1 416 Range Not Satisfiable\r\nConnection: close\r\nContent-Range: bytes */" + size
+                    + "\r\nContent-Length: 0\r\n\r\n").getBytes(StandardCharsets.ISO_8859_1));
+            output.flush();
+            return;
+        }
+        long start = range == null ? 0 : range[0];
+        long length = range == null ? size : range[1] - range[0] + 1;
+
+        StringBuilder head = new StringBuilder();
+        head.append(range == null ? "HTTP/1.1 200 OK\r\n" : "HTTP/1.1 206 Partial Content\r\n")
+                .append("Connection: close\r\n")
+                .append("Content-Type: application/octet-stream\r\n")
+                .append("Content-Length: ").append(length).append("\r\n")
+                .append("Accept-Ranges: bytes\r\n")
+                .append("Access-Control-Allow-Origin: *\r\n")
+                .append("Content-Disposition: attachment; filename*=UTF-8''").append(urlEncode(entry.name)).append("\r\n");
+        if (range != null) {
+            head.append("Content-Range: bytes ").append(range[0]).append("-").append(range[1]).append("/").append(size).append("\r\n");
+        }
+        head.append("\r\n");
+        output.write(head.toString().getBytes(StandardCharsets.ISO_8859_1));
+
+        try (RandomAccessFile file = new RandomAccessFile(entry.file, "r")) {
+            file.seek(start);
+            byte[] buffer = new byte[TRANSFER_BUFFER];
+            long remaining = length;
+            while (remaining > 0) {
+                int read = file.read(buffer, 0, (int) Math.min(buffer.length, remaining));
+                if (read == -1) break;
                 output.write(buffer, 0, read);
+                remaining -= read;
             }
         }
         output.flush();

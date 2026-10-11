@@ -51,16 +51,45 @@ final class PeerClient {
         }
     }
 
+    /** Files at least this big are fetched over several connections at once. */
+    static final long SPLIT_FROM_BYTES = 16L * 1024 * 1024;
+    static final int CONNECTIONS = 4;
+
+    /** Thrown when the sender is an older app version that cannot serve parts of a file. */
+    private static class NoRangeSupport extends java.io.IOException {
+        NoRangeSupport() {
+            super("Sender does not support partial downloads");
+        }
+    }
+
     static File download(String base, RemoteFile remote, File dir, Progress progress) throws Exception {
         if (!dir.exists()) dir.mkdirs();
         File target = uniqueFile(dir, LocalShareServer.safeFileName(remote.name));
-        HttpURLConnection connection = open(base + remote.url);
         boolean complete = false;
+        try {
+            if (remote.size >= SPLIT_FROM_BYTES) {
+                try {
+                    downloadSplit(base + remote.url, remote.size, target, progress);
+                } catch (NoRangeSupport older) {
+                    progress.on(0, remote.size);
+                    downloadWhole(base + remote.url, remote.size, target, progress);
+                }
+            } else {
+                downloadWhole(base + remote.url, remote.size, target, progress);
+            }
+            complete = true;
+            return target;
+        } finally {
+            if (!complete) target.delete();
+        }
+    }
+
+    private static void downloadWhole(String url, long total, File target, Progress progress) throws Exception {
+        HttpURLConnection connection = open(url);
         try (InputStream input = connection.getInputStream();
              FileOutputStream output = new FileOutputStream(target)) {
-            long total = remote.size;
             long done = 0;
-            byte[] buffer = new byte[256 * 1024];
+            byte[] buffer = new byte[1024 * 1024];
             int read;
             while ((read = input.read(buffer)) != -1) {
                 output.write(buffer, 0, read);
@@ -68,12 +97,78 @@ final class PeerClient {
                 progress.on(done, total);
             }
             if (total > 0 && done < total) throw new java.io.IOException("Connection dropped");
-            complete = true;
-            return target;
         } finally {
             connection.disconnect();
-            if (!complete) target.delete();
         }
+    }
+
+    /**
+     * Fetches one file as several byte ranges in parallel, each written straight to its place.
+     * Wi-Fi links usually carry more in total over a few connections than over a single one.
+     */
+    private static void downloadSplit(String url, long total, File target, Progress progress) throws Exception {
+        try (java.io.RandomAccessFile reserve = new java.io.RandomAccessFile(target, "rw")) {
+            reserve.setLength(total);
+        }
+        final java.util.concurrent.atomic.AtomicLong done = new java.util.concurrent.atomic.AtomicLong();
+        final java.util.concurrent.atomic.AtomicReference<Exception> failure = new java.util.concurrent.atomic.AtomicReference<>();
+        final java.util.List<HttpURLConnection> connections = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        long part = total / CONNECTIONS;
+        Thread[] workers = new Thread[CONNECTIONS];
+        for (int i = 0; i < CONNECTIONS; i++) {
+            final long first = i * part;
+            final long last = i == CONNECTIONS - 1 ? total - 1 : first + part - 1;
+            workers[i] = new Thread(() -> {
+                HttpURLConnection connection = null;
+                try {
+                    if (failure.get() != null) return;
+                    connection = open(url);
+                    connection.setRequestProperty("Range", "bytes=" + first + "-" + last);
+                    connections.add(connection);
+                    int status = connection.getResponseCode();
+                    if (status == 200) throw new NoRangeSupport();
+                    if (status != 206) throw new java.io.IOException("Sender answered " + status);
+                    try (InputStream input = connection.getInputStream();
+                         java.io.RandomAccessFile output = new java.io.RandomAccessFile(target, "rw")) {
+                        output.seek(first);
+                        long remaining = last - first + 1;
+                        byte[] buffer = new byte[1024 * 1024];
+                        while (remaining > 0) {
+                            int read = input.read(buffer, 0, (int) Math.min(buffer.length, remaining));
+                            if (read == -1) throw new java.io.IOException("Connection dropped");
+                            output.write(buffer, 0, read);
+                            remaining -= read;
+                            long soFar = done.addAndGet(read);
+                            synchronized (done) {
+                                progress.on(soFar, total);
+                            }
+                        }
+                    }
+                } catch (Exception error) {
+                    // The first failure wins; cut the other connections so they stop too.
+                    if (failure.compareAndSet(null, error)) {
+                        synchronized (connections) {
+                            for (HttpURLConnection other : connections) other.disconnect();
+                        }
+                    }
+                } finally {
+                    if (connection != null) connection.disconnect();
+                }
+            }, "download-part-" + i);
+            workers[i].start();
+        }
+        try {
+            for (Thread worker : workers) worker.join();
+        } catch (InterruptedException cancelled) {
+            failure.compareAndSet(null, cancelled);
+            synchronized (connections) {
+                for (HttpURLConnection other : connections) other.disconnect();
+            }
+            for (Thread worker : workers) worker.interrupt();
+            Thread.currentThread().interrupt();
+        }
+        if (failure.get() != null) throw failure.get();
+        if (done.get() != total) throw new java.io.IOException("Connection dropped");
     }
 
     static void upload(String base, String name, File file, Progress progress) throws Exception {
@@ -88,7 +183,7 @@ final class PeerClient {
             try (FileInputStream input = new FileInputStream(file);
                  OutputStream output = connection.getOutputStream()) {
                 long done = 0;
-                byte[] buffer = new byte[256 * 1024];
+                byte[] buffer = new byte[1024 * 1024];
                 int read;
                 while ((read = input.read(buffer)) != -1) {
                     output.write(buffer, 0, read);

@@ -9,10 +9,12 @@ import android.app.AlertDialog;
 import android.bluetooth.BluetoothAdapter;
 import android.content.ClipData;
 import android.content.ClipboardManager;
+import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
+import android.database.Cursor;
 import android.location.LocationManager;
 import android.media.MediaScannerConnection;
 import android.net.Uri;
@@ -22,6 +24,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.OpenableColumns;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
@@ -36,6 +39,9 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.util.ArrayList;
@@ -102,6 +108,8 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
 
     // Receive: connected to a sender
     private TextView peerStatus;
+    private TextView peerLink;
+    private String linkText;
     private TextView transfersLabel;
     private LinearLayout transfersBox;
     private LinearLayout peerFiles;
@@ -165,6 +173,15 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
             if (Session.kind != Session.Kind.NONE) Session.stop(this);
             showHome();
         }
+
+        boolean sharedIn = savedInstanceState == null && acceptShare(getIntent());
+        if (!sharedIn && Session.kind == Session.Kind.NONE && Session.pendingShare.isEmpty()) clearIncoming();
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        acceptShare(intent);
     }
 
     @Override
@@ -240,6 +257,7 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
         body.addView(Ui.margin(this, Ui.text(this, "Local Share", 30, Ui.INK, true), 0, 16, 0, 2));
         body.addView(Ui.margin(this, Ui.text(this, "Where do you want to share?", 16, Ui.MUTED, false), 0, 0, 0, 28));
 
+        addSharedBanner(body);
         body.addView(choice(R.drawable.ic_desktop, "Share to desktop",
                 "Open a link in the computer's browser. Both on the same Wi-Fi.",
                 () -> startHost(false, false)));
@@ -253,6 +271,7 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
         keepAwake(false);
         LinearLayout body = page("Share to phone");
         body.addView(Ui.margin(this, Ui.text(this, "What does this phone do?", 16, Ui.MUTED, false), 4, 4, 0, 20));
+        addSharedBanner(body);
         body.addView(choice(R.drawable.ic_up, "Send",
                 "Create a direct Wi-Fi link and choose files or apps to send.",
                 this::showSendDialog));
@@ -294,6 +313,8 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
         highSpeed.setTextColor(Ui.INK);
         highSpeed.setButtonTintList(ColorStateList.valueOf(Ui.PRIMARY));
         highSpeed.setEnabled(canHighSpeed);
+        // Speed is the point of this app, so 5 GHz starts ticked whenever the phone can do it.
+        highSpeed.setChecked(canHighSpeed);
         box.addView(Ui.margin(this, highSpeed, -6, 16, 0, 0));
         String note;
         if (!canHighSpeed) {
@@ -429,6 +450,7 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
         refreshHostFiles();
         showHostStatus();
         startTicker();
+        sendShared();
     }
 
     private void showHostStatus() {
@@ -746,6 +768,11 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
         texts.addView(Ui.text(this, "Connected to " + peerName, 18, Ui.INK, true));
         peerStatus = Ui.text(this, "", 14, Ui.MUTED, false);
         texts.addView(Ui.margin(this, peerStatus, 0, 3, 0, 0));
+        // The real link, so a slow transfer can be told apart from a slow band.
+        peerLink = Ui.text(this, "", 14, Ui.INK, true);
+        peerLink.setVisibility(View.GONE);
+        texts.addView(Ui.margin(this, peerLink, 0, 6, 0, 0));
+        linkText = Session.linkInfo();
         head.addView(texts, Ui.weighted());
         status.addView(head);
         body.addView(status);
@@ -780,6 +807,7 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
         startTicker();
         handler.removeCallbacks(transferTick);
         handler.post(transferTick);
+        sendShared();
     }
 
     private void showPeerStatus(boolean unreachable) {
@@ -795,6 +823,7 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
 
     private void pollPeer() {
         String base = Session.peerBase;
+        linkText = Session.linkInfo();
         if (peerPolling || base == null) return;
         peerPolling = true;
         io.execute(() -> {
@@ -857,8 +886,18 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
     }
 
     /** Draws one row per queued transfer and keeps their progress up to date. */
+    private void showLink() {
+        if (peerLink == null) return;
+        long speed = Session.totalSpeed();
+        String text = linkText == null ? "" : "Link: " + linkText;
+        if (speed > 0) text += (text.isEmpty() ? "" : "\n") + "Transferring at " + Ui.formatBytes(speed) + "/s in total";
+        peerLink.setText(text);
+        peerLink.setVisibility(text.isEmpty() ? View.GONE : View.VISIBLE);
+    }
+
     private void renderTransfers() {
         if (transfersBox == null) return;
+        showLink();
         List<Session.Transfer> transfers = Session.transfers;
         transfersLabel.setVisibility(transfers.isEmpty() ? View.GONE : View.VISIBLE);
         for (Session.Transfer transfer : transfers) {
@@ -872,11 +911,15 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
                     long total = transfer.total;
                     long done = transfer.done;
                     views.bar.setProgress(total > 0 ? (int) (done * 1000 / total) : 0);
-                    views.state.setText(total > 0 ? Ui.formatBytes(done) + " / " + Ui.formatBytes(total) : "Starting");
+                    views.state.setText(total > 0
+                            ? (transfer.speed > 0 ? Ui.formatBytes(transfer.speed) + "/s  ·  " : "")
+                            + Ui.formatBytes(done) + " / " + Ui.formatBytes(total)
+                            : "Starting");
                     break;
                 case Session.Transfer.DONE:
                     views.bar.setProgress(1000);
-                    views.state.setText(transfer.upload ? "Sent" : "Saved  ·  tap to open");
+                    String average = transfer.speed > 0 ? "  ·  " + Ui.formatBytes(transfer.speed) + "/s" : "";
+                    views.state.setText(transfer.upload ? "Sent" + average : "Saved" + average + "  ·  tap to open");
                     views.state.setTextColor(Ui.OK);
                     break;
                 case Session.Transfer.FAILED:
@@ -914,6 +957,181 @@ public class MainActivity extends Activity implements PickerView.Host, ScannerVi
         // Newest on top.
         transfersBox.addView(Ui.margin(this, row, 0, 0, 0, 8), 0);
         return views;
+    }
+
+    // ---------------------------------------------------------------- Shared from other apps
+
+    /**
+     * Takes files another app handed over with its Share button. They are copied into the app's
+     * own cache first, because access to the other app's files ends when that app lets go of them.
+     */
+    private boolean acceptShare(Intent intent) {
+        if (intent == null) return false;
+        String action = intent.getAction();
+        boolean single = Intent.ACTION_SEND.equals(action);
+        if (!single && !Intent.ACTION_SEND_MULTIPLE.equals(action)) return false;
+        // Reopening the app from Recents replays the old intent; don't import the same files again.
+        if ((intent.getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) return false;
+
+        List<Uri> uris = new ArrayList<>();
+        try {
+            if (single) {
+                Uri uri = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+                if (uri != null) uris.add(uri);
+            } else {
+                ArrayList<Uri> many = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+                if (many != null) {
+                    for (Uri uri : many) {
+                        if (uri != null) uris.add(uri);
+                    }
+                }
+            }
+        } catch (RuntimeException unreadable) {
+            uris.clear();
+        }
+        CharSequence text = uris.isEmpty() ? intent.getCharSequenceExtra(Intent.EXTRA_TEXT) : null;
+        intent.setAction(Intent.ACTION_MAIN);
+        if (uris.isEmpty() && (text == null || text.length() == 0)) {
+            toast("That app didn't pass any file to share.");
+            return false;
+        }
+
+        toast(uris.size() > 1 ? "Preparing " + uris.size() + " files…" : "Preparing…");
+        File folder = new File(incomingRoot(), String.valueOf(System.currentTimeMillis()));
+        ContentResolver resolver = getContentResolver();
+        String note = text == null ? null : text.toString();
+        new Thread(() -> {
+            int failed = 0;
+            folder.mkdirs();
+            for (Uri uri : uris) {
+                File copy = PeerClient.uniqueFile(folder, LocalShareServer.safeFileName(sharedName(resolver, uri)));
+                try (InputStream input = resolver.openInputStream(uri);
+                     FileOutputStream output = new FileOutputStream(copy)) {
+                    if (input == null) throw new java.io.IOException("unreadable");
+                    byte[] buffer = new byte[256 * 1024];
+                    int read;
+                    while ((read = input.read(buffer)) != -1) output.write(buffer, 0, read);
+                    Session.pendingShare.add(new PickerView.Item(copy.getName(), copy));
+                } catch (Exception error) {
+                    copy.delete();
+                    failed++;
+                }
+            }
+            if (note != null) {
+                File copy = PeerClient.uniqueFile(folder, "Shared text.txt");
+                try (FileOutputStream output = new FileOutputStream(copy)) {
+                    output.write(note.getBytes(StandardCharsets.UTF_8));
+                    Session.pendingShare.add(new PickerView.Item(copy.getName(), copy));
+                } catch (Exception error) {
+                    copy.delete();
+                    failed++;
+                }
+            }
+            int problems = failed;
+            handler.post(() -> sharedArrived(problems));
+        }, "share-import").start();
+        return true;
+    }
+
+    private static String sharedName(ContentResolver resolver, Uri uri) {
+        try (Cursor cursor = resolver.query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst() && !cursor.isNull(0)) {
+                String name = cursor.getString(0);
+                if (name != null && !name.trim().isEmpty()) return name;
+            }
+        } catch (Exception ignored) {
+        }
+        String last = uri.getLastPathSegment();
+        return last == null || last.trim().isEmpty() ? "Shared file" : last;
+    }
+
+    private void sharedArrived(int failed) {
+        if (isDestroyed()) return;
+        if (failed > 0) toast(failed == 1 ? "1 file couldn't be read." : failed + " files couldn't be read.");
+        if (Session.pendingShare.isEmpty()) return;
+        if (screen == Screen.HOST || screen == Screen.PEER) {
+            sendShared();
+        } else if (screen == Screen.HOME) {
+            showHome();
+        } else if (screen == Screen.PHONE) {
+            showPhone();
+        } else {
+            toast("Files are ready and will be sent once you're connected.");
+        }
+    }
+
+    /** Sends whatever is waiting, if a share is running that can take it. */
+    private void sendShared() {
+        if (Session.pendingShare.isEmpty()) return;
+        List<PickerView.Item> items = new ArrayList<>(Session.pendingShare);
+        if (screen == Screen.HOST && Session.server != null) {
+            Session.pendingShare.clear();
+            for (PickerView.Item item : items) Session.server.link(item.name, item.file);
+            refreshHostFiles();
+            toast(items.size() == 1 ? "1 item shared" : items.size() + " items shared");
+        } else if (screen == Screen.PEER && Session.peerBase != null) {
+            Session.pendingShare.clear();
+            String base = Session.peerBase;
+            for (PickerView.Item item : items) {
+                String name = item.name;
+                File file = item.file;
+                Session.addTransfer(name, true, progress -> {
+                    PeerClient.upload(base, name, file, progress);
+                    return null;
+                });
+            }
+            renderTransfers();
+        }
+    }
+
+    /** On the choice screens: says files are waiting and that picking a destination sends them. */
+    private void addSharedBanner(LinearLayout body) {
+        int count = Session.pendingShare.size();
+        if (count == 0) return;
+        long bytes = 0;
+        for (PickerView.Item item : Session.pendingShare) bytes += item.file.length();
+
+        LinearLayout banner = Ui.row(this);
+        banner.setBackground(Ui.shape(this, Ui.PRIMARY_SOFT, 20));
+        banner.setPadding(dp(16), dp(14), dp(8), dp(14));
+        banner.addView(Ui.icon(this, R.drawable.ic_file, Ui.PRIMARY), Ui.lp(dp(22), dp(22)));
+        LinearLayout texts = Ui.column(this);
+        texts.setPadding(dp(12), 0, dp(8), 0);
+        texts.addView(Ui.text(this, (count == 1 ? "1 file" : count + " files") + " ready to send  ·  " + Ui.formatBytes(bytes),
+                15, Ui.INK, true));
+        texts.addView(Ui.text(this, "Choose where to send below and they'll be added automatically.", 13, Ui.MUTED, false));
+        banner.addView(texts, Ui.weighted());
+        ImageView clear = Ui.icon(this, R.drawable.ic_close, Ui.MUTED);
+        clear.setPadding(dp(10), dp(10), dp(10), dp(10));
+        clear.setBackground(Ui.ripple(this, 0x00FFFFFF, 20));
+        clear.setContentDescription("Don't send these files");
+        clear.setOnClickListener(v -> {
+            Session.pendingShare.clear();
+            if (screen == Screen.PHONE) showPhone(); else showHome();
+        });
+        banner.addView(clear, Ui.lp(dp(40), dp(40)));
+        body.addView(Ui.margin(this, banner, 0, 0, 0, 16));
+    }
+
+    private File incomingRoot() {
+        File cache = getExternalCacheDir();
+        return new File(cache != null ? cache : getCacheDir(), "incoming");
+    }
+
+    /** Removes copies left over from earlier shares. Only called when nothing is using them. */
+    private void clearIncoming() {
+        File root = incomingRoot();
+        new Thread(() -> {
+            File[] folders = root.listFiles();
+            if (folders == null) return;
+            for (File folder : folders) {
+                File[] files = folder.listFiles();
+                if (files != null) {
+                    for (File file : files) file.delete();
+                }
+                folder.delete();
+            }
+        }, "share-cleanup").start();
     }
 
     // ---------------------------------------------------------------- Picker
